@@ -18,19 +18,20 @@ jobs:
       - name: Installer Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Node 20 est en cours de dépréciation sur les runners GitHub
+          # (avertissement observé le 03/09/2026) — 24 est la version LTS
+          # actuelle.
+          node-version: "24"
 
       - name: Installer clasp
         run: npm install -g @google/clasp
 
-      # Correctif : le secret est passé via une variable d'environnement
+      # Le secret est passé via une variable d'environnement
       # (CLASP_CREDENTIALS), PAS inséré directement dans la commande —
       # sinon un caractère spécial du shell présent dans le token (`$`,
       # backtick...) peut être interprété au lieu d'être écrit tel quel,
-      # corrompant le fichier JSON généré (constat concret : "Expected
-      # property name ... at position 4" lors du premier essai).
-      # printf '%s' (au lieu de echo) écrit le contenu exact, sans
-      # ajouter ou interpréter quoi que ce soit.
+      # corrompant le fichier JSON généré. printf '%s' (au lieu de echo)
+      # écrit le contenu exact, sans ajouter ou interpréter quoi que ce soit.
       - name: Restaurer les identifiants clasp (secret GitHub)
         env:
           CLASP_CREDENTIALS: ${{ secrets.CLASP_CREDENTIALS }}
