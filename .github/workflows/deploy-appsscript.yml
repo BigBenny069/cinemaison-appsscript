@@ -1,0 +1,38 @@
+name: Déployer vers Apps Script
+
+# Se déclenche à chaque envoi (push) sur la branche principale.
+# Si ton repo utilise "master" au lieu de "main", change la ligne
+# ci-dessous en conséquence.
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code du repo
+        uses: actions/checkout@v4
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Installer clasp
+        run: npm install -g @google/clasp
+
+      - name: Restaurer les identifiants clasp (secret GitHub)
+        run: echo "${{ secrets.CLASP_CREDENTIALS }}" > ~/.clasprc.json
+
+      - name: Envoyer le code vers Apps Script (clasp push)
+        run: clasp push --force
+
+      # -i <ID> pointe vers le déploiement WEB APP EXISTANT (celui dont
+      # l'URL /exec est déjà configurée sur Vercel) — indispensable pour
+      # que l'URL reste identique au lieu de créer un nouveau déploiement
+      # à chaque fois. Voir DEPLOYMENT_ID ci-dessous, à remplacer par le
+      # vrai ID une fois récupéré (étape "clasp deployments" du guide).
+      - name: Créer une nouvelle version du déploiement existant
+        run: clasp deploy -i "${{ secrets.CLASP_DEPLOYMENT_ID }}" -d "Déploiement automatique GitHub Actions"
