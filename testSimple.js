@@ -1,3 +1,3 @@
    function testSimple() {
-     Logger.log("Ça marche");
+     Logger.log("Ça marche TROP BIEN");
    }
