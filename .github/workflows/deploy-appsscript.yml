@@ -23,8 +23,18 @@ jobs:
       - name: Installer clasp
         run: npm install -g @google/clasp
 
+      # Correctif : le secret est passé via une variable d'environnement
+      # (CLASP_CREDENTIALS), PAS inséré directement dans la commande —
+      # sinon un caractère spécial du shell présent dans le token (`$`,
+      # backtick...) peut être interprété au lieu d'être écrit tel quel,
+      # corrompant le fichier JSON généré (constat concret : "Expected
+      # property name ... at position 4" lors du premier essai).
+      # printf '%s' (au lieu de echo) écrit le contenu exact, sans
+      # ajouter ou interpréter quoi que ce soit.
       - name: Restaurer les identifiants clasp (secret GitHub)
-        run: echo "${{ secrets.CLASP_CREDENTIALS }}" > ~/.clasprc.json
+        env:
+          CLASP_CREDENTIALS: ${{ secrets.CLASP_CREDENTIALS }}
+        run: printf '%s' "$CLASP_CREDENTIALS" > ~/.clasprc.json
 
       - name: Envoyer le code vers Apps Script (clasp push)
         run: clasp push --force
@@ -32,7 +42,8 @@ jobs:
       # -i <ID> pointe vers le déploiement WEB APP EXISTANT (celui dont
       # l'URL /exec est déjà configurée sur Vercel) — indispensable pour
       # que l'URL reste identique au lieu de créer un nouveau déploiement
-      # à chaque fois. Voir DEPLOYMENT_ID ci-dessous, à remplacer par le
-      # vrai ID une fois récupéré (étape "clasp deployments" du guide).
+      # à chaque fois.
       - name: Créer une nouvelle version du déploiement existant
-        run: clasp deploy -i "${{ secrets.CLASP_DEPLOYMENT_ID }}" -d "Déploiement automatique GitHub Actions"
+        env:
+          CLASP_DEPLOYMENT_ID: ${{ secrets.CLASP_DEPLOYMENT_ID }}
+        run: clasp deploy -i "$CLASP_DEPLOYMENT_ID" -d "Déploiement automatique GitHub Actions"
