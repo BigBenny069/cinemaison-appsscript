@@ -3,7 +3,7 @@
  * CinéMaison V4
  * Script : 05_ENRICHISSEMENT.gs
  * Rôle   : Orchestration TMDb + Letterboxd
- * Version: 4.6.0
+ * Version: 4.6.1
  * Dépendances :
  *   - 00_CONFIG.gs
  *   - 01_UTILS.gs
@@ -12,6 +12,20 @@
  *
  * IMPORTANT :
  * Ce script ne touche jamais aux disponibilités.
+ *
+ * Correctif V4.6.1 (04/09/2026) :
+ * - Constat du 03/09/2026 18h23 : un timeout transitoire du service
+ *   Google Sheets ("Service Spreadsheets timed out...") sur UN SEUL
+ *   film faisait échouer toute la boucle enrichirFilmsV4_ — les films
+ *   restants du lot n'étaient pas traités ce cycle-ci (repris
+ *   automatiquement au cycle suivant, donc rien de perdu, mais tout le
+ *   lot retardé à cause d'un seul raté passager côté Google, avec un
+ *   email d'erreur à chaque fois).
+ * - Chaque film est désormais traité dans son propre try/catch : un
+ *   échec sur une fiche est journalisé individuellement (nouveau
+ *   compteur "Erreurs" dans le récapitulatif de cycle + erreur_()
+ *   dédiée par film), et la boucle continue normalement sur les films
+ *   suivants au lieu de tout interrompre.
  *
  * Correctif V4.6.0 :
  * - chercherLetterboxd_ reçoit désormais le Type (Film/Série/...) de la
@@ -693,6 +707,7 @@ function enrichirFilmsV4_(
     let ok = 0;
     let aVerifier = 0;
     let ignores = 0;
+    let erreurs = 0;
     let arretTemps = false;
 
     for (
@@ -800,33 +815,63 @@ function enrichirFilmsV4_(
         continue;
       }
 
-      preparerLigneEnrichissementV4_(
-        sheet,
-        rowNumber,
-        row,
-        h,
-        analyseIdentite.modifiee
-      );
-
-      const resultat =
-        enrichirUneLigneV4_(
+      /**
+       * Correctif V4.5.6 (04/09/2026) : chaque film est désormais traité
+       * dans son propre try/catch. Avant ce correctif, une exception sur
+       * UN SEUL film (ex. "Service Spreadsheets timed out..." — un
+       * timeout transitoire de Google, pas un bug applicatif) faisait
+       * remonter l'exception jusqu'à enrichirNouvellesFichesV4, qui
+       * arrêtait TOUT le lot en cours : les films suivants dans cette
+       * même exécution n'étaient pas du tout traités ce cycle-ci (ils
+       * l'étaient au cycle suivant, donc rien n'était perdu
+       * définitivement — mais le lot entier était retardé à cause d'un
+       * seul film malchanceux, et ça déclenchait un email d'erreur pour
+       * un simple raté passager côté Google).
+       * Maintenant : un film en échec est journalisé individuellement
+       * (compteur "erreurs" + erreur_() dédiée), et la boucle continue
+       * normalement sur les films suivants.
+       */
+      try {
+        preparerLigneEnrichissementV4_(
           sheet,
           rowNumber,
           row,
           h,
-          modeRevision,
-          analyseIdentite
+          analyseIdentite.modifiee
         );
 
-      traites++;
+        const resultat =
+          enrichirUneLigneV4_(
+            sheet,
+            rowNumber,
+            row,
+            h,
+            modeRevision,
+            analyseIdentite
+          );
 
-      if (
-        resultat &&
-        resultat.statut === "OK"
-      ) {
-        ok++;
-      } else {
-        aVerifier++;
+        traites++;
+
+        if (
+          resultat &&
+          resultat.statut === "OK"
+        ) {
+          ok++;
+        } else {
+          aVerifier++;
+        }
+      } catch (erreurFilm) {
+        erreurs++;
+        erreur_(
+          "ENRICHISSEMENT",
+          "FILM_LIGNE_" + rowNumber,
+          "Échec sur la fiche \"" +
+            titre +
+            "\" (ligne " +
+            rowNumber +
+            ") — reprise automatique au cycle suivant",
+          String(erreurFilm)
+        );
       }
 
       Utilities.sleep(500);
@@ -844,6 +889,8 @@ function enrichirFilmsV4_(
         aVerifier +
         " | Ignorés=" +
         ignores +
+        " | Erreurs=" +
+        erreurs +
         " | Arrêt sécurité temps=" +
         (arretTemps ? "OUI" : "NON")
     );
