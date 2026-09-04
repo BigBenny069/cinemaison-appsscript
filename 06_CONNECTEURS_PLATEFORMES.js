@@ -3,10 +3,20 @@
  * CinéMaison V4
  * Script : 06_CONNECTEURS_PLATEFORMES.gs
  * Rôle   : Connecteurs plateformes — CANAL+ uniquement
- * Version: 4.7.4
+ * Version: 4.7.5
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs,
  *               Worker Cloudflare CANAL+ V3.5
  * ============================================================
+ *
+ * Correctif V4.7.5 (04/09/2026) :
+ * - Email "Dates CANAL+ modifiées" refondu en HTML, même habillage que
+ *   le résumé quotidien (15_DIGEST_EMAIL.gs) : affiche, regroupement
+ *   par urgence (dates avancées / statut modifié / dates reculées),
+ *   10 fiches visibles par groupe puis repli CSS pour le reste. Voir
+ *   construireHtmlModificationsCanalV1_ et fonctions associées.
+ * - L'objet "modification" transporte désormais aussi année et affiche
+ *   (auparavant seulement titre/dates/statuts), nécessaires à ce nouvel
+ *   affichage.
  *
  * Correctif V4.7.4 :
  * - Un film introuvable dans le catalogue Canal+ (error="NO_MATCH" côté
@@ -1026,6 +1036,8 @@ function controleCanalLigneV4_(sheet, rowNumber, row, h) {
         ligne: rowNumber,
         filmId: get_(row, h, "FilmID") || "",
         titre: titre,
+        annee: annee || "",
+        affiche: get_(row, h, "Affiche") || "",
         ancienneDate: normaliserDate_(ancienneDate || ""),
         nouvelleDate: nouvelleDate,
         ancienStatut: ancienStatutAuto || "",
@@ -1368,6 +1380,29 @@ function envoyerMailAlerteErreursCanalV4_(nombreErreurs) {
  * MAILS DE MODIFICATIONS
  * ============================================================
  */
+/**
+ * ============================================================
+ * MAILS DE MODIFICATIONS
+ * ============================================================
+ *
+ * Refonte V4.7.4 (04/09/2026) : email HTML repensé pour reprendre le
+ * même habillage que le résumé quotidien (15_DIGEST_EMAIL.gs) —
+ * jusque-là un simple texte brut. Trois groupes, dans l'ordre
+ * d'urgence décroissante :
+ *   1. Dates AVANCÉES  — le film part plus tôt que prévu (le plus
+ *      urgent, à regarder en premier).
+ *   2. Statut modifié  — un film bascule vers/depuis DATE_CONNUE
+ *      (ex. sortait d'A_VERIFIER_CANAL ou de PLUS_DE_6_MOIS).
+ *   3. Dates RECULÉES  — le film reste plus longtemps que prévu
+ *      (bonne nouvelle, moins urgent).
+ * Chaque groupe affiche ses 10 premières fiches directement ; le
+ * reste est replié derrière une astuce CSS pur (case à cocher
+ * invisible + label cliquable), sans JavaScript — les emails ne
+ * l'exécutent jamais. Ce mécanisme fonctionne dans Gmail (web et
+ * appli) mais son support n'est pas garanti à 100% dans tous les
+ * clients mail ; en cas de souci d'affichage, un simple lien "voir
+ * dans l'app" en repli serait la prochaine étape.
+ */
 function envoyerMailModificationsCanalV4_(modifications) {
   const changementsDates = filtrerModificationsDatesCanalV472_(
     modifications
@@ -1387,42 +1422,41 @@ function envoyerMailModificationsCanalV4_(modifications) {
 
   const email = emailRapport_();
 
-
-  let corps =
-    "CinéMaison - Modifications de disponibilités CANAL+\n\n";
-
-
-  corps +=
-    "Nombre de modifications : " +
-    changementsDates.length +
-    "\n\n";
-
+  const avancees = [];
+  const reculees = [];
+  const statutModifie = [];
 
   changementsDates.forEach(function(m) {
-    corps += "• " + (m.titre || "Titre inconnu") + "\n";
-    corps +=
-      "  Ancienne date auto : " +
-      normaliserDate_(m.ancienneDate || "") +
-      "\n";
-    corps +=
-      "  Nouvelle date auto : " +
-      (m.nouvelleDate || "vide") +
-      "\n";
-    corps +=
-      "  Ancien statut auto : " +
-      (m.ancienStatut || "vide") +
-      "\n";
-    corps +=
-      "  Nouveau statut auto : " +
-      (m.nouveauStatut || "vide") +
-      "\n\n";
+    if ((m.ancienStatut || "") !== (m.nouveauStatut || "")) {
+      statutModifie.push(m);
+      return;
+    }
+    const ancienne = String(m.ancienneDate || "");
+    const nouvelle = String(m.nouvelleDate || "");
+    if (!ancienne || !nouvelle || ancienne === nouvelle) {
+      return;
+    }
+    if (nouvelle < ancienne) {
+      avancees.push(m);
+    } else {
+      reculees.push(m);
+    }
   });
 
+  const html = construireHtmlModificationsCanalV1_(
+    avancees,
+    statutModifie,
+    reculees,
+    changementsDates.length
+  );
 
   MailApp.sendEmail({
     to: email,
-    subject: "CinéMaison - V2 - Dates CANAL+ modifiées",
-    body: corps
+    subject:
+      "CinéMaison - V2 - " +
+      changementsDates.length +
+      " date(s) CANAL+ modifiée(s)",
+    htmlBody: html
   });
 
 
@@ -1431,6 +1465,181 @@ function envoyerMailModificationsCanalV4_(modifications) {
     "CANAL_MODIFICATIONS",
     "OK",
     "Dates AO modifiées envoyées : " + changementsDates.length
+  );
+}
+
+
+/**
+ * Construit le corps HTML de l'email, même habillage que le résumé
+ * quotidien (fond crème, logo CINÉMAISON, séries de fiches avec
+ * affiche). Couleurs en valeurs hexadécimales littérales (les emails
+ * ne supportent pas les variables CSS).
+ */
+function construireHtmlModificationsCanalV1_(
+  avancees,
+  statutModifie,
+  reculees,
+  total
+) {
+  let html =
+    '<div style="background:#EDE7DC;padding:24px 12px">' +
+    '<div style="background:#F7F3EA;border-radius:8px;padding:28px 22px;' +
+    'max-width:480px;margin:0 auto;font-family:Georgia,serif">' +
+    '<div style="font-size:22px;font-weight:bold;color:#3A2E22">' +
+    'CINÉ<span style="color:#B5622B">MAISON</span></div>' +
+    '<div style="font-size:11px;letter-spacing:1.5px;color:#B5622B;' +
+    'margin-top:4px;font-family:Arial,sans-serif">' +
+    'MODIFICATIONS CANAL+ &middot; ' +
+    total +
+    ' CHANGEMENT(S)</div>' +
+    '<div style="border-top:1px solid #DCD3C0;margin:16px 0"></div>';
+
+  html += construireGroupeModificationsCanalV1_(
+    "DATES AVANCÉES (partent plus tôt)",
+    avancees,
+    "date",
+    "#B5622B"
+  );
+  html += construireGroupeModificationsCanalV1_(
+    "STATUT MODIFIÉ",
+    statutModifie,
+    "statut",
+    "#B5622B"
+  );
+  html += construireGroupeModificationsCanalV1_(
+    "DATES RECULÉES (partent plus tard)",
+    reculees,
+    "date",
+    "#6E8B4F"
+  );
+
+  html += "</div></div>";
+  return html;
+}
+
+
+/**
+ * Un groupe (avancées / statut / reculées) : 10 fiches visibles
+ * directement, le reste replié derrière une case à cocher invisible +
+ * label cliquable (astuce CSS pur, aucun JavaScript).
+ */
+function construireGroupeModificationsCanalV1_(
+  titreGroupe,
+  liste,
+  type,
+  couleurAccent
+) {
+  if (!liste || liste.length === 0) {
+    return "";
+  }
+
+  let html =
+    '<div style="font-size:10px;letter-spacing:1px;color:#9A9182;' +
+    'font-family:Arial,sans-serif;margin:16px 0 10px">' +
+    titreGroupe +
+    "</div>";
+
+  const visibles = liste.slice(0, 10);
+  const masquees = liste.slice(10);
+
+  visibles.forEach(function(m) {
+    html += construireFicheModificationCanalV1_(m, type, couleurAccent);
+  });
+
+  if (masquees.length > 0) {
+    const idCase =
+      "cm_" +
+      titreGroupe.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+
+    html +=
+      '<input type="checkbox" id="' +
+      idCase +
+      '" style="display:none">' +
+      '<div style="display:none">' +
+      '<style>#' +
+      idCase +
+      ":checked ~ ." +
+      idCase +
+      "_reste{display:block !important}#" +
+      idCase +
+      ":checked ~ ." +
+      idCase +
+      "_lien{display:none !important}</style></div>" +
+      '<label for="' +
+      idCase +
+      '" class="' +
+      idCase +
+      '_lien" style="display:block;text-align:center;font-size:12px;' +
+      "color:#B5622B;font-family:Arial,sans-serif;margin-top:8px;" +
+      'cursor:pointer">+ ' +
+      masquees.length +
+      " autre(s) &darr;</label>" +
+      '<div class="' +
+      idCase +
+      '_reste" style="display:none">';
+
+    masquees.forEach(function(m) {
+      html += construireFicheModificationCanalV1_(m, type, couleurAccent);
+    });
+
+    html += "</div>";
+  }
+
+  return html;
+}
+
+
+/**
+ * Une fiche individuelle (affiche + titre + année + le changement en
+ * lui-même). type "date" affiche l'ancienne et la nouvelle date ;
+ * type "statut" affiche l'ancien et le nouveau statut.
+ */
+function construireFicheModificationCanalV1_(m, type, couleurAccent) {
+  const titre = escaperHtmlDigestV1_(m.titre || "Titre inconnu");
+  const annee = m.annee ? " (" + m.annee + ")" : "";
+  const affiche = m.affiche || "";
+
+  let ligneDetail;
+  if (type === "statut") {
+    ligneDetail =
+      escaperHtmlDigestV1_(m.ancienStatut || "vide") +
+      ' &rarr; <span style="color:' +
+      couleurAccent +
+      ';font-weight:bold">' +
+      escaperHtmlDigestV1_(m.nouveauStatut || "vide") +
+      "</span>";
+  } else {
+    ligneDetail =
+      escaperHtmlDigestV1_(m.ancienneDate || "") +
+      ' &rarr; <span style="color:' +
+      couleurAccent +
+      ';font-weight:bold">' +
+      escaperHtmlDigestV1_(m.nouvelleDate || "") +
+      "</span>";
+  }
+
+  const imageHtml = affiche
+    ? '<img src="' +
+      affiche +
+      '" width="40" height="60" style="border-radius:3px;' +
+      'object-fit:cover;flex-shrink:0" alt="">'
+    : '<div style="width:40px;height:60px;border-radius:3px;' +
+      'background:#DCD3C0;flex-shrink:0"></div>';
+
+  return (
+    '<div style="display:flex;gap:10px;align-items:center;padding:8px 0;' +
+    'border-bottom:1px solid #E5DECD">' +
+    imageHtml +
+    '<div style="min-width:0">' +
+    '<div style="font-size:14px;color:#3A2E22;font-weight:bold">' +
+    titre +
+    '<span style="font-weight:normal;color:#9A9182">' +
+    annee +
+    "</span></div>" +
+    '<div style="font-size:12px;color:#9A9182;font-family:Arial,sans-serif;' +
+    'margin-top:2px">' +
+    ligneDetail +
+    "</div></div></div>"
   );
 }
 
