@@ -3,10 +3,27 @@
  * CinéMaison V4
  * Script : 06_CONNECTEURS_PLATEFORMES.gs
  * Rôle   : Connecteurs plateformes — CANAL+ uniquement
- * Version: 4.7.5
+ * Version: 4.7.6
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs,
  *               Worker Cloudflare CANAL+ V3.5
  * ============================================================
+ *
+ * Correctif V4.7.6 (05/09/2026) :
+ * - Groupe "STATUT MODIFIÉ" : affichait uniquement le changement de
+ *   statut (ex. "vide → DATE_CONNUE") sans jamais montrer la date
+ *   elle-même. Ajout d'une seconde ligne (ancienneDate → nouvelleDate)
+ *   quand une date a effectivement changé en même temps que le statut
+ *   — voir construireFicheModificationCanalV1_.
+ * - Affiche trop collée au texte : le "gap" du conteneur flex n'est pas
+ *   fiable dans tous les clients mail (Gmail le supprime souvent au
+ *   sanitizing). Remplacé par une marge explicite (margin-right) sur
+ *   l'affiche elle-même, qui survit au nettoyage des styles.
+ * - Fond éclairci (crème plus clair et chaud, variante validée sur
+ *   mockup) : extérieur #EDE7DC -> #F5EFE0, carte #F7F3EA -> #FFFBF2.
+ * - Document HTML complet avec balises color-scheme "light only" pour
+ *   empêcher Gmail d'appliquer son mode sombre automatique (qui
+ *   inversait le fond clair en noir sans toucher aux couleurs de
+ *   texte, cf. capture de Ben).
  *
  * Correctif V4.7.5 (04/09/2026) :
  * - Email "Dates CANAL+ modifiées" refondu en HTML, même habillage que
@@ -1474,6 +1491,12 @@ function envoyerMailModificationsCanalV4_(modifications) {
  * quotidien (fond crème, logo CINÉMAISON, séries de fiches avec
  * affiche). Couleurs en valeurs hexadécimales littérales (les emails
  * ne supportent pas les variables CSS).
+ *
+ * V4.7.6 : fond éclairci (variante B validée par Ben sur mockup) et
+ * document HTML complet avec balises color-scheme / supported-color-
+ * schemes en "light only" -- sans ça, Gmail applique son mode sombre
+ * automatique et réinverse le fond clair en fond quasi noir tout en
+ * gardant les couleurs de texte d'origine (résultat illisible).
  */
 function construireHtmlModificationsCanalV1_(
   avancees,
@@ -1482,8 +1505,12 @@ function construireHtmlModificationsCanalV1_(
   total
 ) {
   let html =
-    '<div style="background:#EDE7DC;padding:24px 12px">' +
-    '<div style="background:#F7F3EA;border-radius:8px;padding:28px 22px;' +
+    '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+    '<meta name="color-scheme" content="light only">' +
+    '<meta name="supported-color-schemes" content="light only">' +
+    '</head><body style="margin:0;padding:0;background:#F5EFE0">' +
+    '<div style="background:#F5EFE0;padding:24px 12px">' +
+    '<div style="background:#FFFBF2;border-radius:8px;padding:28px 22px;' +
     'max-width:480px;margin:0 auto;font-family:Georgia,serif">' +
     '<div style="font-size:22px;font-weight:bold;color:#3A2E22">' +
     'CINÉ<span style="color:#B5622B">MAISON</span></div>' +
@@ -1492,7 +1519,7 @@ function construireHtmlModificationsCanalV1_(
     'MODIFICATIONS CANAL+ &middot; ' +
     total +
     ' CHANGEMENT(S)</div>' +
-    '<div style="border-top:1px solid #DCD3C0;margin:16px 0"></div>';
+    '<div style="border-top:1px solid #E3D9C4;margin:16px 0"></div>';
 
   html += construireGroupeModificationsCanalV1_(
     "DATES AVANCÉES (partent plus tôt)",
@@ -1513,7 +1540,7 @@ function construireHtmlModificationsCanalV1_(
     "#6E8B4F"
   );
 
-  html += "</div></div>";
+  html += "</div></div></body></html>";
   return html;
 }
 
@@ -1592,43 +1619,57 @@ function construireGroupeModificationsCanalV1_(
 /**
  * Une fiche individuelle (affiche + titre + année + le changement en
  * lui-même). type "date" affiche l'ancienne et la nouvelle date ;
- * type "statut" affiche l'ancien et le nouveau statut.
+ * type "statut" affiche l'ancien et le nouveau statut, PLUS la date
+ * (ancienne → nouvelle) si elle a changé en même temps — c'est
+ * typiquement le cas quand un film bascule vers DATE_CONNUE : le
+ * statut seul ("vide → DATE_CONNUE") ne dit pas quelle est cette date.
  */
 function construireFicheModificationCanalV1_(m, type, couleurAccent) {
   const titre = escaperHtmlDigestV1_(m.titre || "Titre inconnu");
   const annee = m.annee ? " (" + m.annee + ")" : "";
   const affiche = m.affiche || "";
 
+  const ancienneDate = escaperHtmlDigestV1_(m.ancienneDate || "");
+  const nouvelleDate = escaperHtmlDigestV1_(m.nouvelleDate || "");
+
+  const ligneStatut =
+    escaperHtmlDigestV1_(m.ancienStatut || "vide") +
+    ' &rarr; <span style="color:' +
+    couleurAccent +
+    ';font-weight:bold">' +
+    escaperHtmlDigestV1_(m.nouveauStatut || "vide") +
+    "</span>";
+
+  const ligneDate =
+    (ancienneDate || "vide") +
+    ' &rarr; <span style="color:' +
+    couleurAccent +
+    ';font-weight:bold">' +
+    (nouvelleDate || "vide") +
+    "</span>";
+
   let ligneDetail;
   if (type === "statut") {
-    ligneDetail =
-      escaperHtmlDigestV1_(m.ancienStatut || "vide") +
-      ' &rarr; <span style="color:' +
-      couleurAccent +
-      ';font-weight:bold">' +
-      escaperHtmlDigestV1_(m.nouveauStatut || "vide") +
-      "</span>";
+    ligneDetail = ligneStatut;
+    if (nouvelleDate && nouvelleDate !== ancienneDate) {
+      ligneDetail +=
+        '<div style="margin-top:3px">' + ligneDate + "</div>";
+    }
   } else {
-    ligneDetail =
-      escaperHtmlDigestV1_(m.ancienneDate || "") +
-      ' &rarr; <span style="color:' +
-      couleurAccent +
-      ';font-weight:bold">' +
-      escaperHtmlDigestV1_(m.nouvelleDate || "") +
-      "</span>";
+    ligneDetail = ligneDate;
   }
 
   const imageHtml = affiche
     ? '<img src="' +
       affiche +
       '" width="40" height="60" style="border-radius:3px;' +
-      'object-fit:cover;flex-shrink:0" alt="">'
+      'object-fit:cover;flex-shrink:0;margin-right:12px" alt="">'
     : '<div style="width:40px;height:60px;border-radius:3px;' +
-      'background:#DCD3C0;flex-shrink:0"></div>';
+      'background:#E3D9C4;flex-shrink:0;margin-right:12px"></div>';
 
   return (
-    '<div style="display:flex;gap:10px;align-items:center;padding:8px 0;' +
-    'border-bottom:1px solid #E5DECD">' +
+    '<div style="display:flex;align-items:center;padding:8px 0;' +
+    'border-bottom:1px solid #EFE7D6">' +
     imageHtml +
     '<div style="min-width:0">' +
     '<div style="font-size:14px;color:#3A2E22;font-weight:bold">' +
