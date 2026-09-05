@@ -3,8 +3,17 @@
  * CinéMaison V4
  * Script : 15_DIGEST_EMAIL.gs
  * Rôle   : Email quotidien récapitulatif des films qui partent bientôt
- * Version: 1.0
+ * Version: 1.1
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs
+ *
+ * Correctif V1.1 (05/09/2026) :
+ * - Retrait du lien "VOIR SUR LETTERBOXD →" (Ben n'en a pas l'usage).
+ * - Ajout à la place, sur la même ligne infos que la plateforme et le
+ *   J-X : la durée (colonne "Duree", déjà présente dans le Sheet, ex.
+ *   "1h31") et la note Letterboxd (colonne "NoteLetterboxd", format
+ *   virgule décimale française "3,54" -> normalisée en point avant
+ *   parsing, puis affichée "★ 3.5", même logique que parseRating() côté
+ *   App.jsx pour rester cohérent visuellement avec l'app).
  *
  * PRINCIPE :
  * Une fois par jour, envoie un email récapitulatif (mise en forme façon
@@ -113,7 +122,8 @@ function envoyerDigestEmailQuotidienV1() {
         annee: get_(row, h, "Annee"),
         plateforme: get_(row, h, "Plateforme"),
         affiche: get_(row, h, "Affiche"),
-        urlLetterboxd: get_(row, h, "URLLetterboxd"),
+        duree: get_(row, h, "Duree"),
+        noteLetterboxd: get_(row, h, "NoteLetterboxd"),
         jours: jours,
         romy: toBool_(get_(row, h, "Romy")),
         benoit: toBool_(get_(row, h, "Benoit"))
@@ -214,9 +224,13 @@ function construireHtmlDigestEmailV1_(tous, pourRomy, pourBenoit, seuil) {
       ? '<img src="' + f.affiche + '" width="60" height="86" style="border-radius:4px;object-fit:cover;display:block;" alt="">'
       : '<div style="width:60px;height:86px;background:#E4DCCB;border-radius:4px;"></div>';
 
-    const lienLetterboxd = f.urlLetterboxd && /letterboxd\.com\/film\//i.test(f.urlLetterboxd)
-      ? '<a href="' + f.urlLetterboxd + '" style="color:' + couleurOr + ';text-decoration:none;font-size:11px;letter-spacing:1px;">VOIR SUR LETTERBOXD →</a>'
-      : "";
+    const noteFormatee = formaterNoteLetterboxdDigestV1_(f.noteLetterboxd);
+
+    const infosSecondaires = [
+      f.plateforme || "",
+      f.duree || "",
+      noteFormatee ? "★ " + noteFormatee : ""
+    ].filter(Boolean).join(" &middot; ");
 
     return (
       '<tr><td style="padding:14px 0;border-bottom:1px solid #E4DCCB;">' +
@@ -224,8 +238,7 @@ function construireHtmlDigestEmailV1_(tous, pourRomy, pourBenoit, seuil) {
           '<td width="60" style="vertical-align:top;">' + affiche + '</td>' +
           '<td style="vertical-align:top;padding-left:16px;">' +
             '<div style="font-family:Georgia,serif;font-size:16px;color:' + couleurTexte + ';font-weight:bold;">' + escaperHtmlDigestV1_(f.titre) + (f.annee ? ' <span style="font-weight:normal;color:' + couleurMuted + ';">(' + f.annee + ')</span>' : '') + '</div>' +
-            '<div style="font-family:monospace;font-size:11px;letter-spacing:1px;color:' + couleurMuted + ';text-transform:uppercase;margin-top:4px;">' + escaperHtmlDigestV1_(f.plateforme || "") + ' &middot; <span style="color:' + urgence + ';font-weight:bold;">J-' + f.jours + '</span></div>' +
-            (lienLetterboxd ? '<div style="margin-top:8px;">' + lienLetterboxd + '</div>' : '') +
+            '<div style="font-family:monospace;font-size:11px;letter-spacing:1px;color:' + couleurMuted + ';text-transform:uppercase;margin-top:4px;">' + escaperHtmlDigestV1_(infosSecondaires) + ' &middot; <span style="color:' + urgence + ';font-weight:bold;">J-' + f.jours + '</span></div>' +
           '</td>' +
         '</tr></table>' +
       '</td></tr>'
@@ -273,6 +286,19 @@ function escaperHtmlDigestV1_(texte) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+
+/**
+ * Normalise "3,54" (virgule décimale française telle que stockée dans
+ * le Sheet) en nombre, puis formate en 1 décimale ("3.5"). Même logique
+ * que parseRating() dans App.jsx, pour rester cohérent avec l'affichage
+ * dans l'app. Retourne "" si la valeur est vide ou non numérique.
+ */
+function formaterNoteLetterboxdDigestV1_(valeur) {
+  if (valeur === null || valeur === undefined || valeur === "") return "";
+  const n = Number(String(valeur).trim().replace(",", "."));
+  return isNaN(n) ? "" : n.toFixed(1);
 }
 
 
