@@ -3,12 +3,19 @@
  * CinéMaison V4
  * Script : 00_CONFIG.gs
  * Rôle   : Configuration centrale
- * Version: 4.0.3
+ * Version: 4.0.4
+ *
+ * Correctif 2026-09-06 (V4.0.4) :
+ *   - renommage ajouterServicesEmailManquantsV1_ -> sans underscore
+ *     final : cette fonction est faite pour être lancée à la main,
+ *     mais le underscore final (convention "fonction interne" dans ce
+ *     projet) la faisait disparaître du menu déroulant "Exécuter" de
+ *     l'éditeur Apps Script.
  *
  * Correctif 2026-09-06 :
  *   - ajout du 6e service "AjoutAutoPrime" (alerte quand prime.js crée
  *     automatiquement une fiche pour un titre Prime sans correspondance
- *     CinéMaison) + ajouterServicesEmailManquantsV1_() pour ajouter la
+ *     CinéMaison) + ajouterServicesEmailManquantsV1() pour ajouter la
  *     colonne à une matrice DESTINATAIRES_EMAIL déjà créée.
  *
  * Correctif 2026-09-05 :
@@ -537,7 +544,7 @@ function supprimerDestinatairesEmailV1() {
  * sans toucher aux colonnes déjà présentes. Ne fait rien si tout est
  * déjà à jour.
  */
-function ajouterServicesEmailManquantsV1_() {
+function ajouterServicesEmailManquantsV1() {
   const sheet = getSheet_(SHEETS.DESTINATAIRES_EMAIL);
   if (!sheet) {
     Logger.log(
