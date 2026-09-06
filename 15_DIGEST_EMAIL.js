@@ -3,8 +3,22 @@
  * CinéMaison V4
  * Script : 15_DIGEST_EMAIL.gs
  * Rôle   : Email quotidien récapitulatif des films qui partent bientôt
- * Version: 1.1
+ * Version: 1.3
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs
+ *
+ * Correctif V1.3 (05/09/2026) :
+ * - "&middot;" s'affichait littéralement (texte "&MIDDOT;") entre
+ *   plateforme/durée/note au lieu du point médian "·" : le séparateur
+ *   était une entité HTML incluse AVANT escaperHtmlDigestV1_, qui
+ *   échappait le "&" en "&amp;" et cassait l'entité. Remplacé par le
+ *   caractère "·" littéral, qui n'a pas besoin d'échappement.
+ *
+ * Correctif V1.2 (05/09/2026) :
+ * - Les destinataires passent par destinatairesPourService_("Digest")
+ *   (00_CONFIG.gs, matrice DESTINATAIRES_EMAIL) au lieu de lire
+ *   DigestEmailDestinataires directement. Rétrocompatible : si
+ *   l'onglet DESTINATAIRES_EMAIL n'existe pas encore, retombe sur
+ *   l'ancien comportement automatiquement.
  *
  * Correctif V1.1 (05/09/2026) :
  * - Retrait du lien "VOIR SUR LETTERBOXD →" (Ben n'en a pas l'usage).
@@ -88,9 +102,9 @@ function envoyerDigestEmailQuotidienV1() {
       return false;
     }
 
-    const destinatairesBrut = String(lireConfig_("DigestEmailDestinataires", "")).trim();
+    const destinataires = destinatairesPourService_("Digest");
 
-    if (!destinatairesBrut) {
+    if (!destinataires) {
       journal_("DIGEST_EMAIL", "ENVOI", "IGNORE", "Aucun destinataire configuré");
       return false;
     }
@@ -142,13 +156,8 @@ function envoyerDigestEmailQuotidienV1() {
 
     const html = construireHtmlDigestEmailV1_(partentBientot, pourRomy, pourBenoit, seuil);
 
-    const destinataires = destinatairesBrut
-      .split(/[,;]/)
-      .map(function(e) { return e.trim(); })
-      .filter(Boolean);
-
     MailApp.sendEmail({
-      to: destinataires.join(","),
+      to: destinataires,
       subject: "CinéMaison - V2 - " + partentBientot.length + " film(s) partent bientôt",
       htmlBody: html
     });
@@ -160,7 +169,7 @@ function envoyerDigestEmailQuotidienV1() {
       "Films=" + partentBientot.length +
       " | Romy=" + pourRomy.length +
       " | Benoit=" + pourBenoit.length +
-      " | Destinataires=" + destinataires.length
+      " | Destinataires=" + destinataires.split(",").length
     );
 
     resoudreErreur_("DIGEST_EMAIL", "ENVOI");
@@ -230,7 +239,7 @@ function construireHtmlDigestEmailV1_(tous, pourRomy, pourBenoit, seuil) {
       f.plateforme || "",
       f.duree || "",
       noteFormatee ? "★ " + noteFormatee : ""
-    ].filter(Boolean).join(" &middot; ");
+    ].filter(Boolean).join(" · ");
 
     return (
       '<tr><td style="padding:14px 0;border-bottom:1px solid #E4DCCB;">' +
@@ -309,9 +318,8 @@ function formaterNoteLetterboxdDigestV1_(valeur) {
  * version réelle, sauf le test sur DigestEmailActif).
  */
 function testerEnvoyerDigestEmailV1() {
-  const destinatairesBrut = String(lireConfig_("DigestEmailDestinataires", "")).trim();
-  if (!destinatairesBrut) {
-    throw new Error("Aucun destinataire configuré (DigestEmailDestinataires vide) — configure-le depuis l'app d'abord.");
+  if (!destinatairesPourService_("Digest")) {
+    throw new Error("Aucun destinataire configuré pour le service Digest — vérifie DESTINATAIRES_EMAIL (ou DigestEmailDestinataires si la migration n'a pas encore été faite).");
   }
 
   const ancienActif = lireConfig_("DigestEmailActif", "NON");
