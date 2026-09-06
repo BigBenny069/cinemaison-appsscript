@@ -124,13 +124,24 @@ function traiterMiseAJourReglagesDigestV1_(corps) {
   if (Number.isFinite(seuilJours) && seuilJours > 0) {
     ecrireConfig_("DigestEmailSeuilJours", String(Math.round(seuilJours)));
   }
+
+  // Garde toujours l'ancienne clé à jour (repli si la matrice n'existe
+  // pas ou est supprimée un jour), ET met à jour la colonne "Digest" de
+  // DESTINATAIRES_EMAIL si elle existe -- c'est cette dernière qui fait
+  // réellement foi depuis sa création (voir destinatairesPourService_).
   ecrireConfig_("DigestEmailDestinataires", destinataires);
+  const matriceMiseAJour = definirDestinatairesPourService_(
+    "Digest",
+    destinataires.split(/[,;]/)
+  );
 
   journal_(
     "DIGEST_EMAIL",
     "REGLAGES_APP",
     "OK",
-    "Actif=" + actif + " | Seuil=" + seuilJours + " | Destinataires=" + (destinataires ? destinataires.split(/[,;]/).length : 0)
+    "Actif=" + actif + " | Seuil=" + seuilJours + " | Destinataires=" +
+    (destinataires ? destinataires.split(/[,;]/).length : 0) +
+    " | Matrice=" + (matriceMiseAJour ? "OUI" : "NON (onglet absent)")
   );
 
   return reponseJsonWebhook_({ ok: true, actif: actif, seuilJours: seuilJours, destinataires: destinataires });
