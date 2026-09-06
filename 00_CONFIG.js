@@ -369,6 +369,68 @@ function destinatairesPourService_(service) {
 
 
 /**
+ * Remplace, pour UN service donné, la liste des adresses cochées OUI par
+ * exactement celle fournie -- sémantique "voici la nouvelle liste
+ * complète", pas un ajout. Ne touche jamais aux colonnes des AUTRES
+ * services pour une adresse existante (une adresse cochée OUI sur
+ * AlerteTechnique le reste, même si elle est retirée de la liste Digest).
+ *
+ * Utilisée par traiterMiseAJourReglagesDigestV1_ (09_WEBHOOK.gs) pour que
+ * le champ "Destinataires" de l'écran Réglages agisse réellement sur la
+ * matrice, plutôt que sur l'ancienne clé DigestEmailDestinataires devenue
+ * ignorée depuis que la matrice existe.
+ *
+ * Retourne false (et ne fait rien) si l'onglet DESTINATAIRES_EMAIL
+ * n'existe pas encore -- l'appelant garde alors son propre repli.
+ */
+function definirDestinatairesPourService_(service, listeAdresses) {
+  if (SERVICES_EMAIL_V1.indexOf(service) === -1) {
+    Logger.log(
+      "AVERTISSEMENT definirDestinatairesPourService_ : service inconnu \"" +
+      service + "\"."
+    );
+    return false;
+  }
+
+  const sheet = getSheet_(SHEETS.DESTINATAIRES_EMAIL);
+  if (!sheet) return false;
+
+  const adressesVoulues = (listeAdresses || [])
+    .map(function(e) { return String(e || "").trim(); })
+    .filter(Boolean);
+  const adressesVouluesMin = adressesVoulues.map(function(e) {
+    return e.toLowerCase();
+  });
+
+  const data = sheet.getDataRange().getValues();
+  const entetes = data[0].map(function(e) { return String(e || "").trim(); });
+  const colService = entetes.indexOf(service);
+  const colAdresse = entetes.indexOf("Adresse");
+  if (colService === -1 || colAdresse === -1) return false;
+
+  const dejaVues = {};
+
+  for (let i = 1; i < data.length; i++) {
+    const adresse = String(data[i][colAdresse] || "").trim();
+    if (!adresse) continue;
+    dejaVues[adresse.toLowerCase()] = true;
+    const doitEtreOui = adressesVouluesMin.indexOf(adresse.toLowerCase()) !== -1;
+    sheet.getRange(i + 1, colService + 1).setValue(doitEtreOui ? "OUI" : "NON");
+  }
+
+  adressesVoulues.forEach(function(adresse, idx) {
+    if (dejaVues[adressesVouluesMin[idx]]) return;
+    const ligne = SERVICES_EMAIL_V1.map(function(s) {
+      return s === service ? "OUI" : "NON";
+    });
+    sheet.appendRow([adresse].concat(ligne));
+  });
+
+  return true;
+}
+
+
+/**
  * Mise en place à lancer UNE SEULE FOIS depuis l'éditeur Apps Script.
  * Crée l'onglet DESTINATAIRES_EMAIL et le pré-remplit à partir de la
  * config actuelle, pour ne rien perdre au moment de basculer :
