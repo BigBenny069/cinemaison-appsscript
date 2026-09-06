@@ -3,9 +3,17 @@
  * CinéMaison V4
  * Script : 07_MAILS.gs
  * Rôle   : Notifications email
- * Version: 4.1.4
+ * Version: 4.1.5
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs
  * ============================================================
+ *
+ * Correctif V4.1.5 (05/09/2026) :
+ * - envoyerMailRapport_ accepte désormais un 3e paramètre "service"
+ *   (ModifsCanal / AlerteTechnique / ErreursActives / SyntheseJournal
+ *   / Digest), transmis à destinatairesPourService_ (00_CONFIG.gs) au
+ *   lieu de l'ancien emailRapport_() unique. Chaque appelant précise
+ *   son service ; envoyerMailErreurScript_ utilise directement
+ *   "AlerteTechnique".
  *
  * Correctif V4.1.4 :
  * - tous les sujets de mail indiquent désormais "CinéMaison - V2 - ..."
@@ -31,11 +39,10 @@ function envoyerMailErreurScript_(err, fonction) {
 
 
     MailApp.sendEmail({
-      to: emailRapport_(),
+      to: destinatairesPourService_("AlerteTechnique"),
       subject: sujet,
       body: corps
     });
-
 
   } catch (e) {
     Logger.log("Erreur lors de l'envoi du mail d'erreur : " + e);
@@ -43,10 +50,10 @@ function envoyerMailErreurScript_(err, fonction) {
 }
 
 
-function envoyerMailRapport_(sujet, corps) {
+function envoyerMailRapport_(sujet, corps, service) {
   try {
     MailApp.sendEmail({
-      to: emailRapport_(),
+      to: destinatairesPourService_(service || "AlerteTechnique"),
       subject: sujet,
       body: corps
     });
@@ -86,7 +93,8 @@ function envoyerMailModificationsDisponibilite_(modifications, source) {
 
   envoyerMailRapport_(
     "CinéMaison - V2 - Dates modifiées (" + (source || "source inconnue") + ")",
-    corps
+    corps,
+    "ModifsCanal"
   );
 }
 
@@ -183,7 +191,8 @@ function envoyerMailSyntheseErreurs_() {
 
   envoyerMailRapport_(
     "CinéMaison - V2 - " + actives.length + " erreur(s) active(s)",
-    corps
+    corps,
+    "ErreursActives"
   );
 }
 
@@ -372,14 +381,15 @@ function envoyerMailSyntheseJournal_() {
   });
 
 
-  envoyerMailRapport_("CinéMaison - V2 - Synthèse journal", corps);
+  envoyerMailRapport_("CinéMaison - V2 - Synthèse journal", corps, "SyntheseJournal");
 }
 
 
 function testMailV4() {
   envoyerMailRapport_(
     "CinéMaison - V2 - Test mail V4",
-    "Test réussi : 07_MAILS.gs V4 est opérationnel."
+    "Test réussi : 07_MAILS.gs V4 est opérationnel.",
+    "AlerteTechnique"
   );
 }
 function envoyerMailSyntheseErreurs() {
