@@ -3,10 +3,16 @@
  * CinéMaison V4
  * Script : 06_CONNECTEURS_PLATEFORMES.gs
  * Rôle   : Connecteurs plateformes — CANAL+ uniquement
- * Version: 4.7.6
+ * Version: 4.7.7
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs,
  *               Worker Cloudflare CANAL+ V3.5
  * ============================================================
+ *
+ * Correctif V4.7.7 (05/09/2026) :
+ * - Les deux mails (modifications de dates + alerte technique) passent
+ *   par destinatairesPourService_("ModifsCanal" / "AlerteTechnique")
+ *   au lieu de emailRapport_() directement -- voir 00_CONFIG.gs pour la
+ *   matrice DESTINATAIRES_EMAIL.
  *
  * Correctif V4.7.6 (05/09/2026) :
  * - Groupe "STATUT MODIFIÉ" : affichait uniquement le changement de
@@ -1361,7 +1367,7 @@ function appliquerErreurCanalV4_(sheet, rowNumber, h, message) {
  * appliquerNonTrouveCanalV4_), qui ne sont pas une erreur.
  */
 function envoyerMailAlerteErreursCanalV4_(nombreErreurs) {
-  const email = emailRapport_();
+  const email = destinatairesPourService_("AlerteTechnique");
 
   const corps =
     "CinéMaison - Alerte technique CANAL+\n\n" +
@@ -1437,7 +1443,7 @@ function envoyerMailModificationsCanalV4_(modifications) {
   }
 
 
-  const email = emailRapport_();
+  const email = destinatairesPourService_("ModifsCanal");
 
   const avancees = [];
   const reculees = [];
