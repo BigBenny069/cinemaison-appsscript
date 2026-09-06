@@ -3,7 +3,13 @@
  * CinéMaison V4
  * Script : 00_CONFIG.gs
  * Rôle   : Configuration centrale
- * Version: 4.0.2
+ * Version: 4.0.3
+ *
+ * Correctif 2026-09-06 :
+ *   - ajout du 6e service "AjoutAutoPrime" (alerte quand prime.js crée
+ *     automatiquement une fiche pour un titre Prime sans correspondance
+ *     CinéMaison) + ajouterServicesEmailManquantsV1_() pour ajouter la
+ *     colonne à une matrice DESTINATAIRES_EMAIL déjà créée.
  *
  * Correctif 2026-09-05 :
  *   - ajout de la matrice DESTINATAIRES_EMAIL (destinatairesPourService_,
@@ -75,7 +81,8 @@ const SERVICES_EMAIL_V1 = Object.freeze([
   "AlerteTechnique",
   "ErreursActives",
   "SyntheseJournal",
-  "Digest"
+  "Digest",
+  "AjoutAutoPrime"
 ]);
 
 
@@ -519,6 +526,57 @@ function supprimerDestinatairesEmailV1() {
   }
   getSpreadsheet_().deleteSheet(sheet);
   Logger.log("DESTINATAIRES_EMAIL supprimé.");
+}
+
+
+/**
+ * À lancer UNE FOIS quand un nouveau service est ajouté à
+ * SERVICES_EMAIL_V1 après que la matrice existe déjà (ex: ajout de
+ * "AjoutAutoPrime" le 06/09/2026) -- ajoute la ou les colonnes
+ * manquantes avec "NON" par défaut sur toutes les lignes existantes,
+ * sans toucher aux colonnes déjà présentes. Ne fait rien si tout est
+ * déjà à jour.
+ */
+function ajouterServicesEmailManquantsV1_() {
+  const sheet = getSheet_(SHEETS.DESTINATAIRES_EMAIL);
+  if (!sheet) {
+    Logger.log(
+      "DESTINATAIRES_EMAIL n'existe pas encore -- lance " +
+      "initialiserDestinatairesEmailV1() d'abord."
+    );
+    return;
+  }
+
+  const derniereLigne = sheet.getLastRow();
+  const entetesActuelles = sheet
+    .getRange(1, 1, 1, sheet.getLastColumn())
+    .getValues()[0]
+    .map(function(e) { return String(e || "").trim(); });
+
+  const manquants = SERVICES_EMAIL_V1.filter(function(s) {
+    return entetesActuelles.indexOf(s) === -1;
+  });
+
+  if (manquants.length === 0) {
+    Logger.log("Aucune colonne manquante -- la matrice est déjà à jour.");
+    return;
+  }
+
+  manquants.forEach(function(service) {
+    const colonne = sheet.getLastColumn() + 1;
+    sheet.getRange(1, colonne).setValue(service).setFontWeight("bold");
+    if (derniereLigne >= 2) {
+      const valeursNon = [];
+      for (let i = 2; i <= derniereLigne; i++) valeursNon.push(["NON"]);
+      sheet.getRange(2, colonne, valeursNon.length, 1).setValues(valeursNon);
+    }
+  });
+
+  Logger.log(
+    "Colonne(s) ajoutée(s) à DESTINATAIRES_EMAIL : " + manquants.join(", ") +
+    " (valeur par défaut NON sur les " + Math.max(0, derniereLigne - 1) +
+    " ligne(s) existante(s))."
+  );
 }
 
 
