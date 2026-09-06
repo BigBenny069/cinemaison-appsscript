@@ -7,7 +7,7 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 1.3
+ * Version: 1.4
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs, 02_TMDB.gs, 03_LETTERBOXD.gs,
  *               05_ENRICHISSEMENT.gs, 10_DIGEST_EMAIL.gs
  *
@@ -26,6 +26,13 @@
  * pour écrire les réglages du résumé quotidien (10_DIGEST_EMAIL.gs) via
  * ecrireConfig_, sans jamais faire deviner à Vercel la structure exacte
  * de l'onglet CONFIG.
+ *
+ * Correctif V1.4 (06/09/2026) :
+ * Nouvelle action "alerteAjoutAutoPrime" -- appelée directement par
+ * prime.js (pas via Vercel) en fin d'exécution s'il a auto-créé des
+ * fiches pour des titres Prime sans correspondance CinéMaison. Envoie
+ * UN SEUL mail récapitulatif pour tout le lot via
+ * destinatairesPourService_("AjoutAutoPrime").
  *
  * Correctif V1.2 :
  * Erreur récurrente observée en journal ("ENRICHISSEMENT | WEBHOOK_APP |
@@ -77,12 +84,17 @@ const WEBHOOK_REENRICH_QUEUE_PROP_V1 = "CINEMAISON_WEBHOOK_REENRICH_QUEUE_V1";
 const WEBHOOK_REENRICH_HANDLER_V1 = "traiterFileReenrichissementWebhookV1";
 
 /**
- * Point d'entrée HTTP POST. Deux formes de corps JSON acceptées :
+ * Point d'entrée HTTP POST. Trois formes de corps JSON acceptées :
  *   1. { "secret": "...", "id": "FILM0123" }
  *      -> ré-enrichissement immédiat (inchangé depuis V1.0).
  *   2. { "secret": "...", "action": "updateDigestSettings",
  *        "actif": true|false, "seuilJours": 7, "destinataires": "a@x.com,b@y.com" }
  *      -> met à jour les réglages du résumé quotidien par email.
+ *   3. { "secret": "...", "action": "alerteAjoutAutoPrime",
+ *        "fiches": [{ "id": "FILM0999", "titre": "...", "annee": 2024,
+ *        "plateforme": "PRIME VIDEO" }, ...] }
+ *      -> envoie le mail récapitulatif d'auto-ajout (appelé par
+ *      prime.js, en direct, pas via Vercel).
  */
 function doPost(e) {
   try {
@@ -96,6 +108,10 @@ function doPost(e) {
 
     if (corps.action === "updateDigestSettings") {
       return traiterMiseAJourReglagesDigestV1_(corps);
+    }
+
+    if (corps.action === "alerteAjoutAutoPrime") {
+      return traiterAlerteAjoutAutoPrimeV1_(corps);
     }
 
     const id = safeTrim_(corps.id || "");
@@ -145,6 +161,83 @@ function traiterMiseAJourReglagesDigestV1_(corps) {
   );
 
   return reponseJsonWebhook_({ ok: true, actif: actif, seuilJours: seuilJours, destinataires: destinataires });
+}
+
+/**
+ * Reçoit { secret, action: "alerteAjoutAutoPrime", fiches: [{id, titre,
+ * annee, plateforme}, ...] } depuis prime.js (appel direct au webhook,
+ * pas via Vercel -- un seul mail pour tout le lot d'un run, plutôt
+ * qu'un mail par fiche créée).
+ */
+function traiterAlerteAjoutAutoPrimeV1_(corps) {
+  const fiches = Array.isArray(corps.fiches) ? corps.fiches : [];
+  if (fiches.length === 0) {
+    return reponseJsonWebhook_({ ok: false, error: "fiches vide" }, 400);
+  }
+
+  const destinataires = destinatairesPourService_("AjoutAutoPrime");
+  if (destinataires) {
+    const corpsHtml = construireHtmlAjoutAutoPrimeV1_(fiches);
+    MailApp.sendEmail({
+      to: destinataires,
+      subject: "CinéMaison - V2 - " + fiches.length + " fiche(s) ajoutée(s) automatiquement (Prime)",
+      htmlBody: corpsHtml,
+    });
+  }
+
+  journal_(
+    "PRIME_AUTO_AJOUT",
+    "ALERTE_MAIL",
+    destinataires ? "OK" : "IGNORE_SANS_DESTINATAIRE",
+    fiches.length + " fiche(s) : " + fiches.map(function(f) { return f.titre; }).join(", ")
+  );
+
+  return reponseJsonWebhook_({ ok: true, mailEnvoye: !!destinataires, nombreFiches: fiches.length });
+}
+
+
+/**
+ * Même habillage (fond crème, logo CINÉMAISON) que les autres emails,
+ * en plus simple -- ces fiches n'ont encore ni affiche ni synopsis
+ * (elles viennent d'être créées, l'enrichissement automatique s'en
+ * charge au prochain cycle), donc pas de vignette ici.
+ */
+function construireHtmlAjoutAutoPrimeV1_(fiches) {
+  let lignes = "";
+  fiches.forEach(function(f) {
+    lignes +=
+      '<div style="padding:10px 0;border-bottom:1px solid #EFE7D6">' +
+      '<span style="font-family:Georgia,serif;font-size:15px;color:#3A2E22;font-weight:bold">' +
+      escaperHtmlDigestV1_(f.titre) +
+      (f.annee ? ' <span style="font-weight:normal;color:#9A9182">(' + f.annee + ')</span>' : '') +
+      '</span>' +
+      '<div style="font-size:12px;color:#9A9182;font-family:Arial,sans-serif;margin-top:2px">' +
+      escaperHtmlDigestV1_(f.plateforme || "") + ' &middot; ' + escaperHtmlDigestV1_(f.id) +
+      '</div></div>';
+  });
+
+  return (
+    '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+    '<meta name="color-scheme" content="light only">' +
+    '<meta name="supported-color-schemes" content="light only">' +
+    '</head><body style="margin:0;padding:0;background:#F5EFE0">' +
+    '<div style="background:#F5EFE0;padding:24px 12px">' +
+    '<div style="background:#FFFBF2;border-radius:8px;padding:28px 22px;' +
+    'max-width:480px;margin:0 auto;font-family:Georgia,serif">' +
+    '<div style="font-size:22px;font-weight:bold;color:#3A2E22">' +
+    'CINÉ<span style="color:#B5622B">MAISON</span></div>' +
+    '<div style="font-size:11px;letter-spacing:1.5px;color:#B5622B;' +
+    'margin-top:4px;font-family:Arial,sans-serif">' +
+    'AJOUT AUTOMATIQUE (PRIME) &middot; ' + fiches.length + ' FICHE(S)</div>' +
+    '<div style="border-top:1px solid #E3D9C4;margin:16px 0"></div>' +
+    '<div style="font-size:12px;color:#9A9182;font-family:Arial,sans-serif;margin-bottom:12px">' +
+    'Ces titres étaient dans tes favoris Prime Video mais absents de CinéMaison. ' +
+    'Ils ont été créés automatiquement (type déduit du titre, à corriger si besoin) ' +
+    'et seront enrichis (affiche, synopsis...) au prochain cycle.' +
+    '</div>' +
+    lignes +
+    '</div></div></body></html>'
+  );
 }
 
 /**
