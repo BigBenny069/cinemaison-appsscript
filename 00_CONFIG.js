@@ -3,7 +3,17 @@
  * CinéMaison V4
  * Script : 00_CONFIG.gs
  * Rôle   : Configuration centrale
- * Version: 4.0.1
+ * Version: 4.0.2
+ *
+ * Correctif 2026-09-05 :
+ *   - ajout de la matrice DESTINATAIRES_EMAIL (destinatairesPourService_,
+ *     initialiserDestinatairesEmailV1) : chaque adresse peut être
+ *     cochée OUI/NON indépendamment sur les 5 types de mail
+ *     (ModifsCanal, AlerteTechnique, ErreursActives, SyntheseJournal,
+ *     Digest). Remplace EmailRapport (une seule adresse pour les 4
+ *     mails techniques) -- reste utilisée comme repli tant que
+ *     l'onglet n'a pas été créé, ou si aucune adresse n'est cochée
+ *     pour un service donné.
  *
  * Correctif 2026-07-24 :
  *   - restauration de la configuration centrale CinéMaison ;
@@ -38,7 +48,8 @@ const SHEETS = Object.freeze({
   COLONNES: "COLONNES",
   ARCHITECTURE: "ARCHITECTURE",
   JOURNAL: "JOURNAL",
-  ERREURS: "ERREURS"
+  ERREURS: "ERREURS",
+  DESTINATAIRES_EMAIL: "DESTINATAIRES_EMAIL"
 });
 
 
@@ -50,6 +61,22 @@ const SHEET_COLONNES = SHEETS.COLONNES;
 const SHEET_ARCHITECTURE = SHEETS.ARCHITECTURE;
 const SHEET_JOURNAL = SHEETS.JOURNAL;
 const SHEET_ERREURS = SHEETS.ERREURS;
+const SHEET_DESTINATAIRES_EMAIL = SHEETS.DESTINATAIRES_EMAIL;
+
+
+/**
+ * Les 5 types de mails distincts envoyés par CinéMaison V2 — chacun
+ * est une colonne OUI/NON dans l'onglet DESTINATAIRES_EMAIL (V1,
+ * 05/09/2026). "ModifsCanal" et "Digest" sont les deux mails "utiles"
+ * au quotidien ; les 3 autres sont des mails techniques/diagnostic.
+ */
+const SERVICES_EMAIL_V1 = Object.freeze([
+  "ModifsCanal",
+  "AlerteTechnique",
+  "ErreursActives",
+  "SyntheseJournal",
+  "Digest"
+]);
 
 
 const CONFIG_CACHE_V4 = {
@@ -264,6 +291,172 @@ function emailRapport_() {
       lireConfig_("EmailRapport", Session.getActiveUser().getEmail())
     )
   );
+}
+
+
+/**
+ * ============================================================
+ * DESTINATAIRES EMAIL PAR SERVICE (V1, 05/09/2026)
+ * ============================================================
+ * Onglet DESTINATAIRES_EMAIL : une ligne par adresse, une colonne par
+ * service (voir SERVICES_EMAIL_V1) avec "OUI"/"NON". Remplace le
+ * système précédent où EmailRapport (une seule adresse, pour les 4
+ * mails techniques) et DigestEmailDestinataires (une liste, pour le
+ * digest uniquement) étaient gérés séparément et sans granularité.
+ *
+ * Tant que l'onglet n'a pas été créé (via initialiserDestinatairesEmailV1,
+ * à lancer une seule fois manuellement), on retombe sur l'ancien
+ * comportement -- rien ne casse si la migration n'a pas encore été
+ * faite. Pareil si l'onglet existe mais qu'aucune adresse n'est cochée
+ * OUI pour un service donné : on retombe sur emailRapport_() plutôt que
+ * de renvoyer une liste vide (un mail technique qui part dans le vide
+ * silencieusement est pire qu'un mail envoyé au mauvais endroit).
+ *
+ * Retourne une chaîne d'adresses séparées par des virgules, prête pour
+ * MailApp.sendEmail({ to: ... }).
+ */
+function destinatairesPourService_(service) {
+  if (SERVICES_EMAIL_V1.indexOf(service) === -1) {
+    Logger.log(
+      "AVERTISSEMENT destinatairesPourService_ : service inconnu \"" +
+      service + "\" -- utilise EmailRapport par défaut."
+    );
+    return emailRapport_();
+  }
+
+  const sheet = getSheet_(SHEETS.DESTINATAIRES_EMAIL);
+
+  if (!sheet) {
+    // Onglet pas encore créé : ancien comportement.
+    if (service === "Digest") {
+      return String(lireConfig_("DigestEmailDestinataires", ""))
+        .trim()
+        .split(/[,;]/)
+        .map(function(e) { return e.trim(); })
+        .filter(Boolean)
+        .join(",");
+    }
+    return emailRapport_();
+  }
+
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return emailRapport_();
+
+  const entetes = data[0].map(function(e) { return String(e || "").trim(); });
+  const colService = entetes.indexOf(service);
+  const colAdresse = entetes.indexOf("Adresse");
+
+  if (colService === -1 || colAdresse === -1) {
+    Logger.log(
+      "AVERTISSEMENT destinatairesPourService_ : colonne \"" + service +
+      "\" ou \"Adresse\" introuvable dans DESTINATAIRES_EMAIL -- " +
+      "utilise EmailRapport par défaut."
+    );
+    return emailRapport_();
+  }
+
+  const adresses = [];
+  for (let i = 1; i < data.length; i++) {
+    const adresse = String(data[i][colAdresse] || "").trim();
+    const coche = String(data[i][colService] || "").trim().toUpperCase();
+    if (adresse && coche === "OUI") adresses.push(adresse);
+  }
+
+  if (adresses.length === 0) return emailRapport_();
+
+  return adresses.join(",");
+}
+
+
+/**
+ * Mise en place à lancer UNE SEULE FOIS depuis l'éditeur Apps Script.
+ * Crée l'onglet DESTINATAIRES_EMAIL et le pré-remplit à partir de la
+ * config actuelle, pour ne rien perdre au moment de basculer :
+ *   - l'adresse d'EmailRapport est cochée OUI sur les 4 services
+ *     techniques (ModifsCanal, AlerteTechnique, ErreursActives,
+ *     SyntheseJournal) -- exactement ce qu'elle recevait déjà ;
+ *   - chaque adresse de DigestEmailDestinataires est cochée OUI sur
+ *     Digest (fusionnée sur la même ligne si c'est la même adresse
+ *     qu'EmailRapport).
+ * Ne fait rien si l'onglet existe déjà (pour ne jamais écraser une
+ * matrice que Ben aurait déjà modifiée à la main) -- relance
+ * supprimerDestinatairesEmailV1() d'abord si tu veux vraiment repartir
+ * de zéro.
+ */
+function initialiserDestinatairesEmailV1() {
+  if (getSheet_(SHEETS.DESTINATAIRES_EMAIL)) {
+    Logger.log(
+      "DESTINATAIRES_EMAIL existe déjà -- rien fait. Supprime l'onglet " +
+      "à la main (ou lance supprimerDestinatairesEmailV1()) si tu veux " +
+      "relancer la migration depuis zéro."
+    );
+    return;
+  }
+
+  const sheet = getSpreadsheet_().insertSheet(SHEETS.DESTINATAIRES_EMAIL);
+  const entetes = ["Adresse"].concat(SERVICES_EMAIL_V1);
+  sheet.appendRow(entetes);
+  sheet.getRange(1, 1, 1, entetes.length).setFontWeight("bold");
+  sheet.setFrozenRows(1);
+
+  const lignes = {}; // adresse (minuscule) -> { Adresse, ...services }
+
+  const ligne_ = function(adresse) {
+    const cle = adresse.trim().toLowerCase();
+    if (!lignes[cle]) {
+      const nouvelle = { Adresse: adresse.trim() };
+      SERVICES_EMAIL_V1.forEach(function(s) { nouvelle[s] = "NON"; });
+      lignes[cle] = nouvelle;
+    }
+    return lignes[cle];
+  };
+
+  const emailRapportActuel = emailRapport_();
+  if (emailRapportActuel) {
+    const l = ligne_(emailRapportActuel);
+    l.ModifsCanal = "OUI";
+    l.AlerteTechnique = "OUI";
+    l.ErreursActives = "OUI";
+    l.SyntheseJournal = "OUI";
+  }
+
+  String(lireConfig_("DigestEmailDestinataires", ""))
+    .split(/[,;]/)
+    .map(function(e) { return e.trim(); })
+    .filter(Boolean)
+    .forEach(function(adresse) {
+      ligne_(adresse).Digest = "OUI";
+    });
+
+  Object.keys(lignes).forEach(function(cle) {
+    const l = lignes[cle];
+    sheet.appendRow([l.Adresse].concat(SERVICES_EMAIL_V1.map(function(s) {
+      return l[s];
+    })));
+  });
+
+  journal_(
+    "CONFIG",
+    "DESTINATAIRES_EMAIL",
+    "MIGRATION_OK",
+    "Onglet créé avec " + Object.keys(lignes).length + " adresse(s)"
+  );
+  Logger.log(
+    "DESTINATAIRES_EMAIL créé avec " + Object.keys(lignes).length +
+    " adresse(s). Vérifie l'onglet, ajoute Romy si besoin, puis coche " +
+    "les services voulus."
+  );
+}
+
+
+function supprimerDestinatairesEmailV1() {
+  const sheet = getSheet_(SHEETS.DESTINATAIRES_EMAIL);
+  if (!sheet) {
+    Logger.log("DESTINATAIRES_EMAIL n'existe pas -- rien à supprimer.");
+    return;
+  }
+  getSpreadsheet_().deleteSheet(sheet);
+  Logger.log("DESTINATAIRES_EMAIL supprimé.");
 }
 
 
