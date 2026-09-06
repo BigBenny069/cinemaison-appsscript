@@ -7,7 +7,7 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 1.4
+ * Version: 1.8
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs, 02_TMDB.gs, 03_LETTERBOXD.gs,
  *               05_ENRICHISSEMENT.gs, 10_DIGEST_EMAIL.gs
  *
@@ -26,6 +26,30 @@
  * pour écrire les réglages du résumé quotidien (10_DIGEST_EMAIL.gs) via
  * ecrireConfig_, sans jamais faire deviner à Vercel la structure exacte
  * de l'onglet CONFIG.
+ *
+ * Correctif V1.8 (06/09/2026) :
+ * Le mail de suggestions Prime inclut maintenant une section "AMBIGUÏTÉS
+ * À VÉRIFIER" (titres qui correspondent à plusieurs fiches CinéMaison,
+ * durée insuffisante pour départager) -- ces cas ne remontaient nulle
+ * part avant, perdus dans la console à la fermeture de PowerShell.
+ *
+ * Correctif V1.7 (06/09/2026) :
+ * Mail de suggestions Prime : ajout de l'affiche (vignette) et de la
+ * durée à côté de chaque titre, même mise en page que le digest
+ * quotidien (10_DIGEST_EMAIL.gs).
+ *
+ * Correctif V1.6 (06/09/2026) :
+ * Chaque suggestion du mail a maintenant un bouton "+ AJOUTER À
+ * CINÉMAISON" qui pointe vers api/suggestion-confirm.js (page de
+ * confirmation Vercel, PAS ce fichier) -- l'ajout se fait entièrement
+ * côté Vercel, ce fichier ne fait toujours qu'envoyer le mail.
+ *
+ * Correctif V1.5 (06/09/2026) :
+ * Action renommée "alerteAjoutAutoPrime" -> "alerteSuggestionsPrime" --
+ * prime.js (V2.12) n'auto-crée plus rien dans le Sheet (un test réel a
+ * créé plusieurs fiches non voulues), il ne fait plus que suggérer par
+ * mail. Contenu de l'email adapté en conséquence (lien vers la fiche
+ * Prime, mention explicite que rien n'a été écrit).
  *
  * Correctif V1.4 (06/09/2026) :
  * Nouvelle action "alerteAjoutAutoPrime" -- appelée directement par
@@ -90,11 +114,11 @@ const WEBHOOK_REENRICH_HANDLER_V1 = "traiterFileReenrichissementWebhookV1";
  *   2. { "secret": "...", "action": "updateDigestSettings",
  *        "actif": true|false, "seuilJours": 7, "destinataires": "a@x.com,b@y.com" }
  *      -> met à jour les réglages du résumé quotidien par email.
- *   3. { "secret": "...", "action": "alerteAjoutAutoPrime",
- *        "fiches": [{ "id": "FILM0999", "titre": "...", "annee": 2024,
- *        "plateforme": "PRIME VIDEO" }, ...] }
- *      -> envoie le mail récapitulatif d'auto-ajout (appelé par
- *      prime.js, en direct, pas via Vercel).
+ *   3. { "secret": "...", "action": "alerteSuggestionsPrime",
+ *        "fiches": [{ "titre": "...", "annee": 2024, "type": "Film",
+ *        "plateforme": "PRIME VIDEO", "url": "https://..." }, ...] }
+ *      -> envoie le mail de suggestion d'ajout (appelé par prime.js, en
+ *      direct, pas via Vercel). N'écrit rien dans le Sheet.
  */
 function doPost(e) {
   try {
@@ -110,8 +134,8 @@ function doPost(e) {
       return traiterMiseAJourReglagesDigestV1_(corps);
     }
 
-    if (corps.action === "alerteAjoutAutoPrime") {
-      return traiterAlerteAjoutAutoPrimeV1_(corps);
+    if (corps.action === "alerteSuggestionsPrime") {
+      return traiterAlerteSuggestionsPrimeV1_(corps);
     }
 
     const id = safeTrim_(corps.id || "");
@@ -164,57 +188,128 @@ function traiterMiseAJourReglagesDigestV1_(corps) {
 }
 
 /**
- * Reçoit { secret, action: "alerteAjoutAutoPrime", fiches: [{id, titre,
- * annee, plateforme}, ...] } depuis prime.js (appel direct au webhook,
- * pas via Vercel -- un seul mail pour tout le lot d'un run, plutôt
- * qu'un mail par fiche créée).
+ * Reçoit { secret, action: "alerteSuggestionsPrime", fiches: [{titre,
+ * annee, type, plateforme, url}, ...], ambiguites: [{titre, raison,
+ * dureePrimeMinutes, candidats: [{id, annee, duree}, ...]}, ...] }
+ * depuis prime.js (appel direct au webhook, pas via Vercel -- un seul
+ * mail pour tout le lot d'un run). PUREMENT INFORMATIF : rien n'est
+ * écrit dans le Sheet ici.
  */
-function traiterAlerteAjoutAutoPrimeV1_(corps) {
+function traiterAlerteSuggestionsPrimeV1_(corps) {
   const fiches = Array.isArray(corps.fiches) ? corps.fiches : [];
-  if (fiches.length === 0) {
-    return reponseJsonWebhook_({ ok: false, error: "fiches vide" }, 400);
+  const ambiguites = Array.isArray(corps.ambiguites) ? corps.ambiguites : [];
+  if (fiches.length === 0 && ambiguites.length === 0) {
+    return reponseJsonWebhook_({ ok: false, error: "fiches et ambiguites vides" }, 400);
   }
 
   const destinataires = destinatairesPourService_("AjoutAutoPrime");
   if (destinataires) {
-    const corpsHtml = construireHtmlAjoutAutoPrimeV1_(fiches);
-    MailApp.sendEmail({
-      to: destinataires,
-      subject: "CinéMaison - V2 - " + fiches.length + " fiche(s) ajoutée(s) automatiquement (Prime)",
-      htmlBody: corpsHtml,
-    });
+    const corpsHtml = construireHtmlSuggestionsPrimeV1_(fiches, ambiguites);
+    const sujet = fiches.length > 0 && ambiguites.length > 0
+      ? "CinéMaison - V2 - " + fiches.length + " suggestion(s) + " + ambiguites.length + " ambiguïté(s) (Prime)"
+      : fiches.length > 0
+        ? "CinéMaison - V2 - " + fiches.length + " suggestion(s) d'ajout (Prime)"
+        : "CinéMaison - V2 - " + ambiguites.length + " ambiguïté(s) à vérifier (Prime)";
+    MailApp.sendEmail({ to: destinataires, subject: sujet, htmlBody: corpsHtml });
   }
 
   journal_(
-    "PRIME_AUTO_AJOUT",
+    "PRIME_SUGGESTIONS",
     "ALERTE_MAIL",
     destinataires ? "OK" : "IGNORE_SANS_DESTINATAIRE",
-    fiches.length + " fiche(s) : " + fiches.map(function(f) { return f.titre; }).join(", ")
+    fiches.length + " suggestion(s), " + ambiguites.length + " ambiguïté(s) : " +
+    fiches.concat(ambiguites).map(function(f) { return f.titre; }).join(", ")
   );
 
-  return reponseJsonWebhook_({ ok: true, mailEnvoye: !!destinataires, nombreFiches: fiches.length });
+  return reponseJsonWebhook_({ ok: true, mailEnvoye: !!destinataires, nombreFiches: fiches.length, nombreAmbiguites: ambiguites.length });
 }
 
 
 /**
- * Même habillage (fond crème, logo CINÉMAISON) que les autres emails,
- * en plus simple -- ces fiches n'ont encore ni affiche ni synopsis
- * (elles viennent d'être créées, l'enrichissement automatique s'en
- * charge au prochain cycle), donc pas de vignette ici.
+ * Même habillage (fond crème, logo CINÉMAISON) que les autres emails.
+ * Chaque titre pointe vers sa fiche Prime (lien cliquable) pour
+ * vérifier rapidement de quoi il s'agit avant de décider de l'ajouter
+ * ou non depuis l'app.
  */
-function construireHtmlAjoutAutoPrimeV1_(fiches) {
+function construireHtmlSuggestionsPrimeV1_(fiches, ambiguites) {
+  ambiguites = ambiguites || [];
+
   let lignes = "";
   fiches.forEach(function(f) {
+    const titreAffiche = escaperHtmlDigestV1_(f.titre) +
+      (f.annee ? ' <span style="font-weight:normal;color:#9A9182">(' + f.annee + ')</span>' : '');
+
+    const boutonAjout = f.confirmUrl
+      ? '<a href="' + f.confirmUrl + '" style="display:inline-block;margin-top:8px;background:#B5622B;' +
+        'color:#FFFBF2;text-decoration:none;font-family:Arial,sans-serif;font-size:12px;' +
+        'font-weight:bold;padding:8px 14px;border-radius:5px">+ AJOUTER À CINÉMAISON</a>'
+      : '<span style="display:inline-block;margin-top:8px;color:#9A9182;font-family:Arial,sans-serif;' +
+        'font-size:11px">année non détectée -- ajoute à la main depuis l\'app</span>';
+
+    const duree = f.dureeMinutes
+      ? Math.floor(f.dureeMinutes / 60) + "h" + String(f.dureeMinutes % 60).padStart(2, "0")
+      : "";
+    const infosSecondaires = [escaperHtmlDigestV1_(f.plateforme || ""), duree, "type suggéré : " + escaperHtmlDigestV1_(f.type || "?")]
+      .filter(Boolean)
+      .join(" &middot; ");
+
+    const imageHtml = f.affiche
+      ? '<img src="' + f.affiche + '" width="50" height="75" style="border-radius:4px;object-fit:cover;flex-shrink:0;margin-right:12px" alt="">'
+      : '<div style="width:50px;height:75px;border-radius:4px;background:#E3D9C4;flex-shrink:0;margin-right:12px"></div>';
+
+    const titreHtml = f.url
+      ? '<a href="' + f.url + '" style="font-family:Georgia,serif;font-size:15px;color:#3A2E22;font-weight:bold;text-decoration:none">' + titreAffiche + '</a>'
+      : '<span style="font-family:Georgia,serif;font-size:15px;color:#3A2E22;font-weight:bold">' + titreAffiche + '</span>';
+
     lignes +=
-      '<div style="padding:10px 0;border-bottom:1px solid #EFE7D6">' +
-      '<span style="font-family:Georgia,serif;font-size:15px;color:#3A2E22;font-weight:bold">' +
-      escaperHtmlDigestV1_(f.titre) +
-      (f.annee ? ' <span style="font-weight:normal;color:#9A9182">(' + f.annee + ')</span>' : '') +
-      '</span>' +
-      '<div style="font-size:12px;color:#9A9182;font-family:Arial,sans-serif;margin-top:2px">' +
-      escaperHtmlDigestV1_(f.plateforme || "") + ' &middot; ' + escaperHtmlDigestV1_(f.id) +
+      '<div style="display:flex;align-items:flex-start;padding:12px 0;border-bottom:1px solid #EFE7D6">' +
+      imageHtml +
+      '<div style="min-width:0">' +
+      titreHtml +
+      '<div style="font-size:12px;color:#9A9182;font-family:Arial,sans-serif;margin-top:2px">' + infosSecondaires + '</div>' +
+      boutonAjout +
       '</div></div>';
   });
+
+  let lignesAmbigues = "";
+  ambiguites.forEach(function(a) {
+    const dureePrime = a.dureePrimeMinutes
+      ? Math.floor(a.dureePrimeMinutes / 60) + "h" + String(a.dureePrimeMinutes % 60).padStart(2, "0")
+      : "introuvable";
+    const candidatsHtml = (a.candidats || []).map(function(c) {
+      return c.id + " (" + (c.annee || "?") + ", durée Sheet : " + (c.duree || "?") + ")";
+    }).join(" &nbsp;|&nbsp; ");
+
+    lignesAmbigues +=
+      '<div style="padding:10px 0;border-bottom:1px solid #EFE7D6">' +
+      '<span style="font-family:Georgia,serif;font-size:15px;color:#3A2E22;font-weight:bold">' + escaperHtmlDigestV1_(a.titre) + '</span>' +
+      '<div style="font-size:12px;color:#9A9182;font-family:Arial,sans-serif;margin-top:2px">' +
+      'Durée Prime : ' + dureePrime + ' &middot; candidats : ' + escaperHtmlDigestV1_(candidatsHtml) +
+      '</div></div>';
+  });
+
+  const sousTitre = fiches.length > 0 && ambiguites.length > 0
+    ? fiches.length + ' SUGGESTION(S), ' + ambiguites.length + ' AMBIGUÏTÉ(S)'
+    : fiches.length > 0
+      ? fiches.length + ' SUGGESTION(S)'
+      : ambiguites.length + ' AMBIGUÏTÉ(S)';
+
+  const sectionSuggestions = fiches.length > 0
+    ? '<div style="font-size:12px;color:#9A9182;font-family:Arial,sans-serif;margin-bottom:12px">' +
+      'Ces titres sont dans tes favoris Prime Video mais absents de CinéMaison. ' +
+      'RIEN N\'A ÉTÉ CRÉÉ AUTOMATIQUEMENT -- clique "Ajouter à CinéMaison" pour ' +
+      'créer la fiche directement, ou fais-le à la main depuis l\'app. ' +
+      'Chaque titre n\'est proposé qu\'une seule fois.</div>' + lignes
+    : '';
+
+  const sectionAmbiguites = ambiguites.length > 0
+    ? '<div style="font-size:11px;letter-spacing:1px;color:#B5622B;font-family:Arial,sans-serif;' +
+      'margin-top:' + (fiches.length > 0 ? '20px' : '0') + ';margin-bottom:8px">AMBIGUÏTÉS À VÉRIFIER</div>' +
+      '<div style="font-size:12px;color:#9A9182;font-family:Arial,sans-serif;margin-bottom:12px">' +
+      'Ces titres correspondent à PLUSIEURS fiches CinéMaison existantes -- la durée n\'a pas ' +
+      'suffi à départager. Corrige la colonne Duree d\'une des fiches (ça résoudra l\'ambiguïté ' +
+      'tout seul au prochain passage) ou vérifie à la main.</div>' + lignesAmbigues
+    : '';
 
   return (
     '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
@@ -228,14 +323,10 @@ function construireHtmlAjoutAutoPrimeV1_(fiches) {
     'CINÉ<span style="color:#B5622B">MAISON</span></div>' +
     '<div style="font-size:11px;letter-spacing:1.5px;color:#B5622B;' +
     'margin-top:4px;font-family:Arial,sans-serif">' +
-    'AJOUT AUTOMATIQUE (PRIME) &middot; ' + fiches.length + ' FICHE(S)</div>' +
+    'PRIME &middot; ' + sousTitre + '</div>' +
     '<div style="border-top:1px solid #E3D9C4;margin:16px 0"></div>' +
-    '<div style="font-size:12px;color:#9A9182;font-family:Arial,sans-serif;margin-bottom:12px">' +
-    'Ces titres étaient dans tes favoris Prime Video mais absents de CinéMaison. ' +
-    'Ils ont été créés automatiquement (type déduit du titre, à corriger si besoin) ' +
-    'et seront enrichis (affiche, synopsis...) au prochain cycle.' +
-    '</div>' +
-    lignes +
+    sectionSuggestions +
+    sectionAmbiguites +
     '</div></div></body></html>'
   );
 }
