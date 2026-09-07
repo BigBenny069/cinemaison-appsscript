@@ -7,7 +7,7 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 1.8
+ * Version: 1.9
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs, 02_TMDB.gs, 03_LETTERBOXD.gs,
  *               05_ENRICHISSEMENT.gs, 10_DIGEST_EMAIL.gs
  *
@@ -26,6 +26,14 @@
  * pour écrire les réglages du résumé quotidien (10_DIGEST_EMAIL.gs) via
  * ecrireConfig_, sans jamais faire deviner à Vercel la structure exacte
  * de l'onglet CONFIG.
+ *
+ * Correctif V1.9 (06/09/2026) :
+ * Ajout des liens "Ignorer" (suggestions) et "Validé, c'est normal"
+ * (ambiguïtés) dans le mail -- écrivent dans l'onglet PRIME_IGNORES via
+ * api/write-prime-ignore.js (Vercel), lu par prime.js à chaque run.
+ * Sans clic sur l'un de ces boutons (ou "+ Ajouter"), un titre continue
+ * maintenant à revenir dans les mails suivants au lieu de disparaître
+ * tout seul après une seule mention.
  *
  * Correctif V1.8 (06/09/2026) :
  * Le mail de suggestions Prime inclut maintenant une section "AMBIGUÏTÉS
@@ -246,6 +254,11 @@ function construireHtmlSuggestionsPrimeV1_(fiches, ambiguites) {
       : '<span style="display:inline-block;margin-top:8px;color:#9A9182;font-family:Arial,sans-serif;' +
         'font-size:11px">année non détectée -- ajoute à la main depuis l\'app</span>';
 
+    const lienIgnorer = f.ignorerUrl
+      ? ' &nbsp; <a href="' + f.ignorerUrl + '" style="display:inline-block;margin-top:8px;' +
+        'color:#9A9182;text-decoration:underline;font-family:Arial,sans-serif;font-size:11px">Ignorer</a>'
+      : '';
+
     const duree = f.dureeMinutes
       ? Math.floor(f.dureeMinutes / 60) + "h" + String(f.dureeMinutes % 60).padStart(2, "0")
       : "";
@@ -267,7 +280,7 @@ function construireHtmlSuggestionsPrimeV1_(fiches, ambiguites) {
       '<div style="min-width:0">' +
       titreHtml +
       '<div style="font-size:12px;color:#9A9182;font-family:Arial,sans-serif;margin-top:2px">' + infosSecondaires + '</div>' +
-      boutonAjout +
+      boutonAjout + lienIgnorer +
       '</div></div>';
   });
 
@@ -280,12 +293,18 @@ function construireHtmlSuggestionsPrimeV1_(fiches, ambiguites) {
       return c.id + " (" + (c.annee || "?") + ", durée Sheet : " + (c.duree || "?") + ")";
     }).join(" &nbsp;|&nbsp; ");
 
+    const boutonValide = a.ignorerUrl
+      ? '<a href="' + a.ignorerUrl + '" style="display:inline-block;margin-top:8px;background:#6E8B4F;' +
+        'color:#FFFBF2;text-decoration:none;font-family:Arial,sans-serif;font-size:12px;' +
+        'font-weight:bold;padding:8px 14px;border-radius:5px">VALIDÉ, C\'EST NORMAL</a>'
+      : '';
+
     lignesAmbigues +=
       '<div style="padding:10px 0;border-bottom:1px solid #EFE7D6">' +
       '<span style="font-family:Georgia,serif;font-size:15px;color:#3A2E22;font-weight:bold">' + escaperHtmlDigestV1_(a.titre) + '</span>' +
       '<div style="font-size:12px;color:#9A9182;font-family:Arial,sans-serif;margin-top:2px">' +
       'Durée Prime : ' + dureePrime + ' &middot; candidats : ' + escaperHtmlDigestV1_(candidatsHtml) +
-      '</div></div>';
+      '</div><div>' + boutonValide + '</div></div>';
   });
 
   const sousTitre = fiches.length > 0 && ambiguites.length > 0
@@ -298,8 +317,8 @@ function construireHtmlSuggestionsPrimeV1_(fiches, ambiguites) {
     ? '<div style="font-size:12px;color:#9A9182;font-family:Arial,sans-serif;margin-bottom:12px">' +
       'Ces titres sont dans tes favoris Prime Video mais absents de CinéMaison. ' +
       'RIEN N\'A ÉTÉ CRÉÉ AUTOMATIQUEMENT -- clique "Ajouter à CinéMaison" pour ' +
-      'créer la fiche directement, ou fais-le à la main depuis l\'app. ' +
-      'Chaque titre n\'est proposé qu\'une seule fois.</div>' + lignes
+      'créer la fiche directement, ou "Ignorer" pour ne plus jamais en entendre parler. ' +
+      'Sans action de ta part, ce titre reviendra dans les prochains mails.</div>' + lignes
     : '';
 
   const sectionAmbiguites = ambiguites.length > 0
@@ -308,7 +327,8 @@ function construireHtmlSuggestionsPrimeV1_(fiches, ambiguites) {
       '<div style="font-size:12px;color:#9A9182;font-family:Arial,sans-serif;margin-bottom:12px">' +
       'Ces titres correspondent à PLUSIEURS fiches CinéMaison existantes -- la durée n\'a pas ' +
       'suffi à départager. Corrige la colonne Duree d\'une des fiches (ça résoudra l\'ambiguïté ' +
-      'tout seul au prochain passage) ou vérifie à la main.</div>' + lignesAmbigues
+      'tout seul au prochain passage), ou clique "Validé, c\'est normal" si ce sont bien deux ' +
+      'films distincts. Sans action, ça reviendra dans les prochains mails.</div>' + lignesAmbigues
     : '';
 
   return (
