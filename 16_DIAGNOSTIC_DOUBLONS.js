@@ -10,8 +10,12 @@
  *             - PLATEFORMES DIFFÉRENTES : normal et voulu (le même film
  *               peut légitimement être suivi sur CANAL+ ET Prime en même
  *               temps) -- pour information seulement, rien à corriger.
- * Version : 1.0 (06/09/2026)
+ * Version : 1.1 (08/09/2026)
  * ============================================================
+ *
+ * Correctif V1.1 : écriture du rapport en un seul appel réseau au lieu
+ * d'un appel par ligne (plus rapide, moins sujet au "Service
+ * Spreadsheets timed out" que sur un gros Sheet).
  *
  * Usage : lance detecterDoublonsFilmsV1() depuis l'éditeur Apps Script.
  * Résultat écrit dans un nouvel onglet DIAGNOSTIC_DOUBLONS (recréé à
@@ -89,38 +93,61 @@ function normaliserTitreDoublonsV1_(titre) {
     .trim();
 }
 
+/**
+ * V1.1 (08/09/2026) : réécriture pour tout écrire en UN SEUL appel
+ * setValues() (plus quelques appels de mise en forme groupés), au lieu
+ * d'un appel réseau par ligne comme avant -- beaucoup plus rapide, et
+ * surtout beaucoup moins sujet au "Service Spreadsheets timed out"
+ * rencontré le 08/09/2026 (plus d'appels réseau = plus de chances
+ * qu'un seul d'entre eux traîne et fasse échouer tout le lot).
+ */
 function ecrireRapportDoublonsV1_(classeur, memePlateforme, plateformesDifferentes) {
   const nomOnglet = "DIAGNOSTIC_DOUBLONS";
   let feuille = classeur.getSheetByName(nomOnglet);
   if (feuille) classeur.deleteSheet(feuille);
   feuille = classeur.insertSheet(nomOnglet);
 
-  let ligne = 1;
+  const lignes = [];
+  const lignesGrasEnTete = []; // numéros de ligne (1-indexé) à mettre en gras
 
-  feuille.getRange(ligne, 1).setValue("MÊME PLATEFORME -- À VÉRIFIER (probable erreur)").setFontWeight("bold");
-  ligne += 1;
-  feuille.getRange(ligne, 1, 1, 5).setValues([["Titre", "Année", "Plateforme", "ID", "Ligne Films"]]).setFontWeight("bold");
-  ligne += 1;
-  memePlateforme.forEach(function(membres) {
-    membres.forEach(function(m) {
-      feuille.getRange(ligne, 1, 1, 5).setValues([[m.titre, m.annee, m.plateforme, m.id, m.ligne]]);
-      ligne += 1;
-    });
-    ligne += 1; // ligne vide entre chaque groupe
-  });
+  function ajouterTitre(texte) {
+    lignes.push([texte, "", "", "", ""]);
+    lignesGrasEnTete.push(lignes.length);
+  }
 
-  ligne += 2;
-  feuille.getRange(ligne, 1).setValue("PLATEFORMES DIFFÉRENTES -- NORMAL, POUR INFO").setFontWeight("bold");
-  ligne += 1;
-  feuille.getRange(ligne, 1, 1, 5).setValues([["Titre", "Année", "Plateforme", "ID", "Ligne Films"]]).setFontWeight("bold");
-  ligne += 1;
-  plateformesDifferentes.forEach(function(membres) {
-    membres.forEach(function(m) {
-      feuille.getRange(ligne, 1, 1, 5).setValues([[m.titre, m.annee, m.plateforme, m.id, m.ligne]]);
-      ligne += 1;
+  function ajouterEntetesColonnes() {
+    lignes.push(["Titre", "Année", "Plateforme", "ID", "Ligne Films"]);
+    lignesGrasEnTete.push(lignes.length);
+  }
+
+  function ajouterGroupes(groupes) {
+    groupes.forEach(function(membres) {
+      membres.forEach(function(m) {
+        lignes.push([m.titre, m.annee, m.plateforme, m.id, m.ligne]);
+      });
+      lignes.push(["", "", "", "", ""]); // ligne vide entre chaque groupe
     });
-    ligne += 1;
-  });
+  }
+
+  ajouterTitre("MÊME PLATEFORME -- À VÉRIFIER (probable erreur)");
+  ajouterEntetesColonnes();
+  ajouterGroupes(memePlateforme);
+
+  lignes.push(["", "", "", "", ""]);
+  lignes.push(["", "", "", "", ""]);
+  ajouterTitre("PLATEFORMES DIFFÉRENTES -- NORMAL, POUR INFO");
+  ajouterEntetesColonnes();
+  ajouterGroupes(plateformesDifferentes);
+
+  // Un seul appel réseau pour tout le contenu.
+  feuille.getRange(1, 1, lignes.length, 5).setValues(lignes);
+
+  // Un seul appel réseau pour tout le gras (RangeList regroupe les
+  // adresses non contiguës en une seule requête).
+  const adressesGras = lignesGrasEnTete.map(function(l) { return "A" + l + ":E" + l; });
+  if (adressesGras.length > 0) {
+    feuille.getRangeList(adressesGras).setFontWeight("bold");
+  }
 
   feuille.autoResizeColumns(1, 5);
   feuille.setFrozenRows(0);
