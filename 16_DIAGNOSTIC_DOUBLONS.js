@@ -10,8 +10,15 @@
  *             - PLATEFORMES DIFFÉRENTES : normal et voulu (le même film
  *               peut légitimement être suivi sur CANAL+ ET Prime en même
  *               temps) -- pour information seulement, rien à corriger.
- * Version : 1.4 (08/09/2026)
+ * Version : 1.5 (08/09/2026)
  * ============================================================
+ *
+ * Correctif V1.5 : le timeout persistait même sur un rapport minuscule
+ * (113 lignes, V1.4) -- écarte l'hypothèse "trop de données". Nouvelle
+ * piste : deleteSheet()+insertSheet() modifient la STRUCTURE du
+ * classeur, une opération a priori plus lourde qu'un simple
+ * setValues(). L'onglet est maintenant créé une seule fois puis
+ * seulement vidé (clear()) et réécrit aux exécutions suivantes.
  *
  * Correctif V1.4 : le timeout persistait malgré les délais allongés
  * (V1.3) -- écriture découpée en blocs de 300 lignes + taille du
@@ -37,9 +44,9 @@
  * Spreadsheets timed out" que sur un gros Sheet).
  *
  * Usage : lance detecterDoublonsFilmsV1() depuis l'éditeur Apps Script.
- * Résultat écrit dans un nouvel onglet DIAGNOSTIC_DOUBLONS (recréé à
- * chaque lancement), PAS dans Films -- purement un rapport de lecture,
- * ne modifie jamais Films.
+ * Résultat écrit dans l'onglet DIAGNOSTIC_DOUBLONS (créé une seule
+ * fois, puis vidé et réécrit à chaque lancement suivant), PAS dans
+ * Films -- purement un rapport de lecture, ne modifie jamais Films.
  */
 
 /** Réessaie jusqu'à 3 fois (pause 5s, 15s, 30s) si fonction() lève une exception. */
@@ -161,8 +168,11 @@ function normaliserTitreDoublonsV1_(titre) {
 function ecrireRapportDoublonsV1_(classeur, memePlateforme, plateformesDifferentes) {
   const nomOnglet = "DIAGNOSTIC_DOUBLONS";
   let feuille = classeur.getSheetByName(nomOnglet);
-  if (feuille) classeur.deleteSheet(feuille);
-  feuille = classeur.insertSheet(nomOnglet);
+  if (feuille) {
+    feuille.clear();
+  } else {
+    feuille = classeur.insertSheet(nomOnglet);
+  }
 
   const lignes = [];
   const lignesGrasEnTete = []; // numéros de ligne (1-indexé) à mettre en gras
