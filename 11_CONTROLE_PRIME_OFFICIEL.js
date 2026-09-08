@@ -3,8 +3,14 @@
  * CinéMaison V4
  * Script  : 11_CONTROLE_PRIME_OFFICIEL.gs
  * Rôle    : Diagnostic et import sécurisé des résultats Prime Video officiels
- * Version : 1.1.1
+ * Version : 1.1.2
  * ============================================================
+ *
+ * Correctif V1.1.2 (07/09/2026) : ajout d'un "return" du résumé
+ * (compteurs) à la toute fin de traiterResultatsPrimeOfficielV110_ --
+ * AUCUNE ligne existante modifiée, juste une valeur de retour en plus
+ * (ignorée quand la fonction est lancée depuis l'éditeur, comme avant).
+ * Sert à construire l'email de validation "Appliquer" (09_WEBHOOK.gs).
  *
  * Principes de sécurité :
  * - la simulation n'écrit rien dans Films ;
@@ -168,14 +174,14 @@ function diagnostiquerControlePrimeOfficielV110() {
 
 
 function verifierResultatsPrimeOfficielSansEcriture() {
-  traiterResultatsPrimeOfficielV110_(false);
+  return traiterResultatsPrimeOfficielV110_(false);
 }
 
 
 
 
 function appliquerResultatsPrimeOfficiel() {
-  traiterResultatsPrimeOfficielV110_(true);
+  return traiterResultatsPrimeOfficielV110_(true);
 }
 
 
@@ -404,6 +410,18 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
   Logger.log("Erreurs : " + erreurs);
   if (!ecrire) Logger.log("AUCUNE ÉCRITURE EFFECTUÉE");
   Logger.log("===== FIN IMPORT PRIME OFFICIEL =====");
+
+  return {
+    ecrire: ecrire,
+    controlesValides: controlesValides,
+    datesValidees: datesValidees,
+    sansAlerte: sansAlerte,
+    conflitsProteges: conflitsProteges,
+    ajoutsPlateforme: ajoutsPlateforme,
+    changements: changements,
+    ignores: ignores,
+    erreurs: erreurs,
+  };
 }
 
 
