@@ -10,8 +10,13 @@
  *             - PLATEFORMES DIFFÉRENTES : normal et voulu (le même film
  *               peut légitimement être suivi sur CANAL+ ET Prime en même
  *               temps) -- pour information seulement, rien à corriger.
- * Version : 1.3 (08/09/2026)
+ * Version : 1.4 (08/09/2026)
  * ============================================================
+ *
+ * Correctif V1.4 : le timeout persistait malgré les délais allongés
+ * (V1.3) -- écriture découpée en blocs de 300 lignes + taille du
+ * rapport loguée avant l'écriture, pour comprendre si c'est une
+ * question de volume ou un vrai aléa Google.
  *
  * Correctif V1.3 : délais de nouvelle tentative allongés (5s/15s/30s,
  * 3 tentatives au lieu de 2) -- le 2s/4s du V1.2 s'est révélé
@@ -136,6 +141,16 @@ function normaliserTitreDoublonsV1_(titre) {
 }
 
 /**
+ * V1.4 (08/09/2026) : le timeout persistait même avec des délais de
+ * nouvelle tentative allongés (5s/15s/30s, V1.3) -- signe possible d'un
+ * rapport bien plus volumineux que prévu plutôt que d'un simple aléa.
+ * Deux ajouts :
+ * - taille du rapport loguée AVANT l'écriture (pour savoir, même si ça
+ *   échoue encore après) ;
+ * - écriture découpée en blocs de 300 lignes au lieu d'un seul (gros)
+ *   bloc -- une requête plus petite a plus de chances d'aboutir avant
+ *   le timeout de Google, même si le rapport complet est volumineux.
+ *
  * V1.1 (08/09/2026) : réécriture pour tout écrire en UN SEUL appel
  * setValues() (plus quelques appels de mise en forme groupés), au lieu
  * d'un appel réseau par ligne comme avant -- beaucoup plus rapide, et
@@ -181,8 +196,20 @@ function ecrireRapportDoublonsV1_(classeur, memePlateforme, plateformesDifferent
   ajouterEntetesColonnes();
   ajouterGroupes(plateformesDifferentes);
 
-  // Un seul appel réseau pour tout le contenu.
-  feuille.getRange(1, 1, lignes.length, 5).setValues(lignes);
+  Logger.log(
+    "Rapport à écrire : " + memePlateforme.length + " groupe(s) même plateforme, " +
+    plateformesDifferentes.length + " groupe(s) plateformes différentes, " +
+    lignes.length + " ligne(s) au total."
+  );
+
+  // Écriture par blocs de 300 lignes plutôt qu'un seul (gros) bloc --
+  // une requête plus petite a plus de chances d'aboutir avant que
+  // Google ne déclenche son propre timeout.
+  const TAILLE_BLOC = 300;
+  for (let debut = 0; debut < lignes.length; debut += TAILLE_BLOC) {
+    const bloc = lignes.slice(debut, debut + TAILLE_BLOC);
+    feuille.getRange(debut + 1, 1, bloc.length, 5).setValues(bloc);
+  }
 
   // Un seul appel réseau pour tout le gras (RangeList regroupe les
   // adresses non contiguës en une seule requête).
