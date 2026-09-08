@@ -10,8 +10,14 @@
  *             - PLATEFORMES DIFFÉRENTES : normal et voulu (le même film
  *               peut légitimement être suivi sur CANAL+ ET Prime en même
  *               temps) -- pour information seulement, rien à corriger.
- * Version : 1.1 (08/09/2026)
+ * Version : 1.2 (08/09/2026)
  * ============================================================
+ *
+ * Correctif V1.2 : jusqu'à 2 nouvelles tentatives (pause 2s puis 4s)
+ * sur la lecture de Films et l'écriture du rapport -- un "Service
+ * Spreadsheets timed out" est resté possible même après le passage à
+ * un seul appel d'écriture (charge ponctuelle côté Google, ou Sheet
+ * sollicité en même temps par un autre script comme prime.js).
  *
  * Correctif V1.1 : écriture du rapport en un seul appel réseau au lieu
  * d'un appel par ligne (plus rapide, moins sujet au "Service
@@ -23,12 +29,37 @@
  * ne modifie jamais Films.
  */
 
+/** Réessaie jusqu'à 2 fois (pause 2s puis 4s) si fonction() lève une exception. */
+function avecNouvellesTentativesDoublonsV1_(fonction, description) {
+  const pauses = [2000, 4000];
+  let derniereErreur;
+  for (let tentative = 0; tentative <= pauses.length; tentative++) {
+    try {
+      return fonction();
+    } catch (e) {
+      derniereErreur = e;
+      if (tentative < pauses.length) {
+        Logger.log(
+          "[" + description + "] tentative " + (tentative + 1) +
+          " échouée (" + e.message + "), nouvel essai dans " +
+          (pauses[tentative] / 1000) + "s..."
+        );
+        Utilities.sleep(pauses[tentative]);
+      }
+    }
+  }
+  throw derniereErreur;
+}
+
 function detecterDoublonsFilmsV1() {
   const classeur = SpreadsheetApp.getActiveSpreadsheet();
   const films = classeur.getSheetByName("Films");
   if (!films) throw new Error("La feuille Films est introuvable.");
 
-  const donnees = films.getDataRange().getValues();
+  const donnees = avecNouvellesTentativesDoublonsV1_(
+    function() { return films.getDataRange().getValues(); },
+    "lecture Films"
+  );
   if (donnees.length < 2) throw new Error("La feuille Films est vide.");
 
   const entetes = donnees[0].map(function(e) { return String(e || "").trim(); });
@@ -74,7 +105,10 @@ function detecterDoublonsFilmsV1() {
     }
   });
 
-  ecrireRapportDoublonsV1_(classeur, memePlateforme, plateformesDifferentes);
+  avecNouvellesTentativesDoublonsV1_(
+    function() { ecrireRapportDoublonsV1_(classeur, memePlateforme, plateformesDifferentes); },
+    "écriture DIAGNOSTIC_DOUBLONS"
+  );
 
   Logger.log(
     "Doublons même plateforme (à vérifier) : " + memePlateforme.length +
