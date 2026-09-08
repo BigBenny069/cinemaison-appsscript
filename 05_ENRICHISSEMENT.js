@@ -3,7 +3,16 @@
  * CinéMaison V4
  * Script : 05_ENRICHISSEMENT.gs
  * Rôle   : Orchestration TMDb + Letterboxd
- * Version: 4.6.1
+ * Version: 4.6.2
+ *
+ * Correctif V4.6.2 (07/09/2026) : rien n'appelait jamais resoudreErreur_
+ * pour le module "ENRICHISSEMENT" -- une erreur (FILM_LIGNE_XXX ou
+ * WEBHOOK_APP) restait marquée ACTIVE indéfiniment dans l'onglet
+ * ERREURS, même une fois le problème résolu tout seul au cycle suivant
+ * (remontait donc chaque jour dans le mail "Erreurs actives", sans
+ * rapport avec la réalité). Chaque ligne retraitée avec succès referme
+ * maintenant sa propre erreur FILM_LIGNE_<row> et, si applicable, une
+ * éventuelle erreur WEBHOOK_APP pour ce même ID.
  * Dépendances :
  *   - 00_CONFIG.gs
  *   - 01_UTILS.gs
@@ -731,6 +740,8 @@ function enrichirFilmsV4_(
       const rowNumber = i + 1;
       const row = data[i];
 
+      const idFilm = safeTrim_(get_(row, h, "ID"));
+
       const titre = cleanTitle_(
         get_(row, h, "Titre")
       );
@@ -851,6 +862,23 @@ function enrichirFilmsV4_(
           );
 
         traites++;
+
+        // Correctif V4.9 (07/09/2026) : rien n'appelait jamais
+        // resoudreErreur_ pour le module ENRICHISSEMENT -- une erreur
+        // "FILM_LIGNE_XXX" restait donc marquée ACTIVE pour toujours,
+        // même une fois le problème résolu tout seul au cycle suivant
+        // (cause du mail "Erreurs actives" qui la remontait encore 24h
+        // après). On la referme ici dès que cette même ligne est
+        // retraitée sans exception (match par module+action seuls, le
+        // message précis important peu ici).
+        resoudreErreur_("ENRICHISSEMENT", "FILM_LIGNE_" + rowNumber);
+        // Referme aussi une éventuelle erreur WEBHOOK_APP restée ACTIVE
+        // pour cette fiche (ex: relance immédiate ratée par verrou pris,
+        // reprise ensuite par ce cycle périodique normal -- même cause
+        // que ci-dessus, juste une clé d'erreur différente).
+        if (idFilm) {
+          resoudreErreur_("ENRICHISSEMENT", "WEBHOOK_APP", "Échec relance immédiate depuis l'app : " + idFilm);
+        }
 
         if (
           resultat &&
