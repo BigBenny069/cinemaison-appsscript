@@ -7,7 +7,13 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.1
+ * Version: 2.2
+ *
+ * Correctif V2.2 (08/09/2026) : mail "CONTRÔLE PRIME" -- le résumé
+ * (Contrôles valides, Dates validées...) s'affichait collé au chiffre
+ * (ex: "Contrôles valides198") -- flex/justify-content:space-between
+ * pas fiable dans les clients mail. Remplacé par un tableau HTML
+ * classique.
  *
  * Correctif V2.1 (07/09/2026) : rien n'appelait jamais resoudreErreur_
  * pour le module "ENRICHISSEMENT" -- une erreur WEBHOOK_APP restait
@@ -339,10 +345,15 @@ function construireHtmlResumeControlePrimeV1_(resume, confirmUrl) {
     ["Ignorés", resume.ignores],
     ["Erreurs", resume.erreurs],
   ].map(function(l) {
-    return '<div style="display:flex;justify-content:space-between;padding:6px 0;' +
-      'border-bottom:1px solid #EFE7D6;font-family:Arial,sans-serif;font-size:13px">' +
-      '<span style="color:#9A9182">' + l[0] + '</span>' +
-      '<span style="color:#3A2E22;font-weight:bold">' + l[1] + '</span></div>';
+    // Tableau plutôt que flex/justify-content:space-between -- pas
+    // fiable dans les clients mail (Gmail nettoie souvent ce genre de
+    // CSS), constaté sur ce mail (chiffres collés au libellé).
+    return '<tr>' +
+      '<td style="padding:6px 0;border-bottom:1px solid #EFE7D6;' +
+      'font-family:Arial,sans-serif;font-size:13px;color:#9A9182">' + l[0] + '</td>' +
+      '<td style="padding:6px 0;border-bottom:1px solid #EFE7D6;' +
+      'font-family:Arial,sans-serif;font-size:13px;color:#3A2E22;font-weight:bold;' +
+      'text-align:right">' + l[1] + '</td></tr>';
   }).join("");
 
   const bouton = confirmUrl
@@ -367,7 +378,7 @@ function construireHtmlResumeControlePrimeV1_(resume, confirmUrl) {
     '<div style="font-size:11px;letter-spacing:1.5px;color:#B5622B;' +
     'margin-top:4px;font-family:Arial,sans-serif">CONTRÔLE PRIME &middot; SIMULATION</div>' +
     '<div style="border-top:1px solid #E3D9C4;margin:16px 0"></div>' +
-    lignes +
+    '<table role="presentation" width="100%" style="border-collapse:collapse">' + lignes + '</table>' +
     bouton +
     '</div></div></body></html>'
   );
