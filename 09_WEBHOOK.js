@@ -7,7 +7,15 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.2
+ * Version: 2.3
+ *
+ * Correctif V2.3 (08/09/2026) : lien "Fusionner avec une fiche
+ * existante" ajouté à chaque suggestion -- pour les titres Prime écrits
+ * différemment du Sheet (donc jamais matchés automatiquement), qui se
+ * retrouvaient à tort dans "Ignorer" alors qu'ils sont bien déjà suivis
+ * dans CinéMaison. Ouvre une page de recherche (api/confirm.js,
+ * page=merge) qui lie le titre à l'ID choisi (onglet PRIME_IGNORES,
+ * type ALIAS).
  *
  * Correctif V2.2 (08/09/2026) : mail "CONTRÔLE PRIME" -- le résumé
  * (Contrôles valides, Dates validées...) s'affichait collé au chiffre
@@ -411,6 +419,11 @@ function construireHtmlSuggestionsPrimeV1_(fiches, ambiguites) {
         'color:#9A9182;text-decoration:underline;font-family:Arial,sans-serif;font-size:11px">Ignorer</a>'
       : '';
 
+    const lienFusionner = f.fusionnerUrl
+      ? ' &nbsp; <a href="' + f.fusionnerUrl + '" style="display:inline-block;margin-top:8px;' +
+        'color:#9A9182;text-decoration:underline;font-family:Arial,sans-serif;font-size:11px">Fusionner avec une fiche existante</a>'
+      : '';
+
     const duree = f.dureeMinutes
       ? Math.floor(f.dureeMinutes / 60) + "h" + String(f.dureeMinutes % 60).padStart(2, "0")
       : "";
@@ -432,7 +445,7 @@ function construireHtmlSuggestionsPrimeV1_(fiches, ambiguites) {
       '<div style="min-width:0">' +
       titreHtml +
       '<div style="font-size:12px;color:#9A9182;font-family:Arial,sans-serif;margin-top:2px">' + infosSecondaires + '</div>' +
-      boutonAjout + lienIgnorer +
+      boutonAjout + lienIgnorer + lienFusionner +
       '</div></div>';
   });
 
@@ -469,7 +482,9 @@ function construireHtmlSuggestionsPrimeV1_(fiches, ambiguites) {
     ? '<div style="font-size:12px;color:#9A9182;font-family:Arial,sans-serif;margin-bottom:12px">' +
       'Ces titres sont dans tes favoris Prime Video mais absents de CinéMaison. ' +
       'RIEN N\'A ÉTÉ CRÉÉ AUTOMATIQUEMENT -- clique "Ajouter à CinéMaison" pour ' +
-      'créer la fiche directement, ou "Ignorer" pour ne plus jamais en entendre parler. ' +
+      'créer la fiche directement, "Ignorer" pour ne plus jamais en entendre parler, ' +
+      'ou "Fusionner avec une fiche existante" si ce titre est déjà dans CinéMaison ' +
+      'mais écrit différemment. ' +
       'Sans action de ta part, ce titre reviendra dans les prochains mails.</div>' + lignes
     : '';
 
