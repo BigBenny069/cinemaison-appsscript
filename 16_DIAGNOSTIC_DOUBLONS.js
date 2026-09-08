@@ -10,8 +10,16 @@
  *             - PLATEFORMES DIFFÉRENTES : normal et voulu (le même film
  *               peut légitimement être suivi sur CANAL+ ET Prime en même
  *               temps) -- pour information seulement, rien à corriger.
- * Version : 1.2 (08/09/2026)
+ * Version : 1.3 (08/09/2026)
  * ============================================================
+ *
+ * Correctif V1.3 : délais de nouvelle tentative allongés (5s/15s/30s,
+ * 3 tentatives au lieu de 2) -- le 2s/4s du V1.2 s'est révélé
+ * insuffisant (2 échecs identiques malgré tout). Si ça continue à
+ * échouer même avec ces délais plus longs, c'est probablement une vraie
+ * surcharge ponctuelle côté Google sur ce Sheet (devenu volumineux),
+ * pas quelque chose qu'une nouvelle tentative peut garantir de
+ * résoudre -- relance simplement la fonction un peu plus tard.
  *
  * Correctif V1.2 : jusqu'à 2 nouvelles tentatives (pause 2s puis 4s)
  * sur la lecture de Films et l'écriture du rapport -- un "Service
@@ -29,9 +37,9 @@
  * ne modifie jamais Films.
  */
 
-/** Réessaie jusqu'à 2 fois (pause 2s puis 4s) si fonction() lève une exception. */
+/** Réessaie jusqu'à 3 fois (pause 5s, 15s, 30s) si fonction() lève une exception. */
 function avecNouvellesTentativesDoublonsV1_(fonction, description) {
-  const pauses = [2000, 4000];
+  const pauses = [5000, 15000, 30000];
   let derniereErreur;
   for (let tentative = 0; tentative <= pauses.length; tentative++) {
     try {
