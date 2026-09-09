@@ -3,8 +3,28 @@
  * CinéMaison V4
  * Script  : 11_CONTROLE_PRIME_OFFICIEL.gs
  * Rôle    : Diagnostic et import sécurisé des résultats Prime Video officiels
- * Version : 1.1.2
+ * Version : 1.2 (08/09/2026)
  * ============================================================
+ *
+ * Correctif V1.2 : mise à jour automatique de Type selon le statut
+ * Prime détecté (StatutPrimeDetecte, 7e colonne CONTROLE_PRIME,
+ * ajoutée par api/controle-prime.js V1.1) :
+ *   - INDISPONIBLE -> Type = "Indispo"
+ *   - VOD -> Type = "VOD"
+ *   - BIENTOT_DISPONIBLE -> Type = "Bientôt disponible"
+ *   - INCLUS -> restaure le Type d'origine (Film/Série/Documentaire/
+ *     Spectacle), mémorisé dans une nouvelle colonne TypeContenuOriginal
+ *     (créée au besoin par ajouterColonneTypeContenuOriginalV1(), à
+ *     lancer une fois depuis l'éditeur avant le premier import qui
+ *     touche Type). Si TypeContenuOriginal est vide alors que Type est
+ *     déjà un statut (Indispo/VOD/Bientôt disponible saisi à la main
+ *     avant ce correctif), on part du principe que c'était "Film" (cas
+ *     largement majoritaire chez Ben) -- loggé explicitement à chaque
+ *     fois pour qu'il puisse vérifier les cas où ce serait faux.
+ *   - ABONNEMENT_COMPLEMENTAIRE / INCONNU : Type non touché, aucune vue
+ *     dédiée pour l'instant.
+ * Ne concerne QUE les fiches PRIME VIDEO (Netflix/Disney auront leur
+ * propre logique similaire plus tard, CANAL+ n'est pas concerné).
  *
  * Correctif V1.1.2 (07/09/2026) : ajout d'un "return" du résumé
  * (compteurs) à la toute fin de traiterResultatsPrimeOfficielV110_ --
@@ -28,6 +48,20 @@ const PRIME_CONTROLE_FEUILLE_V110 = "CONTROLE_PRIME";
 const PRIME_SOURCE_OFFICIELLE_V110 = "PRIME VIDEO OFFICIEL";
 const PRIME_PLATEFORME_V110 = "PRIME VIDEO";
 const PRIME_AGE_MAX_RESULTAT_JOURS_V111 = 7;
+
+// V1.2 (08/09/2026) : mise à jour automatique de Type.
+const PRIME_STATUT_VERS_TYPE_V1 = Object.freeze({
+  "INDISPONIBLE": "Indispo",
+  "VOD": "VOD",
+  "BIENTOT_DISPONIBLE": "Bientôt disponible",
+});
+// Valeurs de Type qui sont déjà un statut écrasé (pas un vrai contenu)
+// -- si TypeContenuOriginal est vide ET que Type vaut une de ces
+// valeurs, on ne peut plus retrouver le vrai contenu avec certitude ;
+// on part du principe que c'était "Film" (cas très majoritaire chez
+// Ben), en le loggant explicitement à chaque fois.
+const PRIME_TYPES_ECRASES_V1 = Object.freeze(["Indispo", "VOD", "Bientôt disponible"]);
+const PRIME_TYPE_PAR_DEFAUT_V1 = "Film";
 
 
 
@@ -269,6 +303,38 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
     }
     controlesValides++;
 
+    // V1.2 (08/09/2026) : calcul du changement de Type éventuel, une
+    // seule fois ici -- appliqué dans les 3 branches d'écriture plus
+    // bas (AUCUNE_ALERTE, CONFLIT PROTÉGÉ, DATE_DETECTEE), car c'est
+    // indépendant du suivi de date (ça reflète juste la disponibilité
+    // actuelle détectée par Prime).
+    const statutPrimeDetecte = String(
+      resultat[hResultats.StatutPrimeDetecte] || ""
+    ).trim().toUpperCase();
+    const changementType = (hFilms.Type !== undefined)
+      ? calculerNouveauTypeV1_(
+          film.valeurs[hFilms.Type],
+          hFilms.TypeContenuOriginal !== undefined ? film.valeurs[hFilms.TypeContenuOriginal] : "",
+          statutPrimeDetecte
+        )
+      : null;
+    if (changementType && hFilms.TypeContenuOriginal === undefined) {
+      Logger.log(
+        "  [Type] TypeContenuOriginal introuvable dans Films -- lance " +
+        "ajouterColonneTypeContenuOriginalV1() une fois, Type non modifié pour " + idFilm + "."
+      );
+    }
+
+    function ecrireChangementTypeSiBesoin_() {
+      if (!changementType || hFilms.TypeContenuOriginal === undefined) return;
+      Logger.log(
+        "  [Type] " + idFilm + " : " + (film.valeurs[hFilms.Type] || "(vide)") +
+        " -> " + changementType.nouveauType
+      );
+      ecrireChampPrimeV110_(films, film.ligne, hFilms, "Type", changementType.nouveauType);
+      ecrireChampPrimeV110_(films, film.ligne, hFilms, "TypeContenuOriginal", changementType.nouveauTypeOriginal);
+    }
+
 
     const plateformesAvant = String(
       film.valeurs[hFilms.PlateformesDetectees] || ""
@@ -294,6 +360,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
           ecrireChampPrimeV110_(films, film.ligne, hFilms,
             "PlateformesDetectees", plateformesApres);
         }
+        ecrireChangementTypeSiBesoin_();
       }
       continue;
     }
@@ -357,6 +424,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
           ecrireChampPrimeV110_(films, film.ligne, hFilms,
             "PlateformesDetectees", plateformesApres);
         }
+        ecrireChangementTypeSiBesoin_();
       }
       continue;
     }
@@ -397,6 +465,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
       ecrireChampPrimeV110_(films, film.ligne, hFilms,
         "DernierChangementDisponibilite", maintenant);
     }
+    ecrireChangementTypeSiBesoin_();
   }
 
 
@@ -424,6 +493,69 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
   };
 }
 
+
+
+
+/**
+ * Calcule le nouveau Type + TypeContenuOriginal à écrire à partir du
+ * statut Prime détecté. Retourne null si rien ne doit changer (statut
+ * non géré comme ABONNEMENT_COMPLEMENTAIRE/INCONNU, ou déjà à jour).
+ */
+function calculerNouveauTypeV1_(typeActuel, typeOriginalActuel, statutPrime) {
+  typeActuel = String(typeActuel || "").trim();
+  typeOriginalActuel = String(typeOriginalActuel || "").trim();
+
+  function origineOuDefaut() {
+    if (typeOriginalActuel) return typeOriginalActuel;
+    if (PRIME_TYPES_ECRASES_V1.indexOf(typeActuel) !== -1) {
+      Logger.log(
+        "  [Type] TypeContenuOriginal vide pour un Type déjà écrasé (" +
+        typeActuel + ") -- par défaut \"" + PRIME_TYPE_PAR_DEFAUT_V1 +
+        "\", à vérifier si ce n'était pas une Série/Documentaire/Spectacle."
+      );
+      return PRIME_TYPE_PAR_DEFAUT_V1;
+    }
+    return typeActuel || PRIME_TYPE_PAR_DEFAUT_V1;
+  }
+
+  if (statutPrime === "INCLUS") {
+    const original = origineOuDefaut();
+    if (typeActuel === original && typeOriginalActuel === original) return null;
+    return { nouveauType: original, nouveauTypeOriginal: original };
+  }
+
+  const nouveauLabel = PRIME_STATUT_VERS_TYPE_V1[statutPrime];
+  if (!nouveauLabel) return null; // ABONNEMENT_COMPLEMENTAIRE, INCONNU... : Type inchangé
+
+  const nouveauTypeOriginal = origineOuDefaut();
+  if (typeActuel === nouveauLabel && typeOriginalActuel === nouveauTypeOriginal) return null;
+
+  return { nouveauType: nouveauLabel, nouveauTypeOriginal: nouveauTypeOriginal };
+}
+
+
+/**
+ * À lancer UNE SEULE FOIS depuis l'éditeur Apps Script, avant le
+ * premier import qui touche Type -- ajoute la colonne TypeContenuOriginal
+ * à Films si elle n'existe pas déjà. Ne fait rien si elle est déjà là.
+ */
+function ajouterColonneTypeContenuOriginalV1() {
+  const classeur = SpreadsheetApp.getActiveSpreadsheet();
+  const films = classeur.getSheetByName("Films");
+  if (!films) throw new Error("La feuille Films est introuvable.");
+
+  const entetes = films.getRange(1, 1, 1, films.getLastColumn()).getValues()[0]
+    .map(function(e) { return String(e || "").trim(); });
+
+  if (entetes.indexOf("TypeContenuOriginal") !== -1) {
+    Logger.log("TypeContenuOriginal existe déjà -- rien fait.");
+    return;
+  }
+
+  const colonne = films.getLastColumn() + 1;
+  films.getRange(1, colonne).setValue("TypeContenuOriginal").setFontWeight("bold");
+  Logger.log("Colonne TypeContenuOriginal ajoutée (colonne " + colonne + ").");
+}
 
 
 
