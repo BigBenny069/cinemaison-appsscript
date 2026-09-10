@@ -7,7 +7,15 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.4
+ * Version: 2.5
+ *
+ * Correctif V2.5 (10/09/2026) : traiterAlerteSuggestionsPrimeV1_ et
+ * traiterAlerteSuggestionsStreamingV1_ sauvegardent maintenant aussi
+ * leurs données dans DERNIERES_SUGGESTIONS_PLATEFORMES (nouvelle
+ * fonction sauvegarderDernieresSuggestionsV1_, dans le nouveau fichier
+ * 18_RAPPORT_ECARTS_PLATEFORMES.gs) -- alimente le rapport quotidien
+ * d'écarts entre CinéMaison et les plateformes. N'affecte pas l'envoi
+ * des mails de suggestions existants, purement additif.
  *
  * Correctif V2.4 (10/09/2026) : 4 nouvelles actions pour Netflix/Disney+,
  * équivalents génériques des actions Prime déjà existantes (paramétrées
@@ -320,6 +328,11 @@ function traiterAlerteSuggestionsPrimeV1_(corps) {
     MailApp.sendEmail({ to: destinataires, subject: sujet, htmlBody: corpsHtml });
   }
 
+  // V1.0 (10/09/2026, 18_RAPPORT_ECARTS_PLATEFORMES.gs) : sauvegarde
+  // aussi ces mêmes données pour le rappel quotidien -- purement
+  // informatif ici, n'affecte pas l'envoi du mail ci-dessus.
+  sauvegarderDernieresSuggestionsV1_("PRIME", fiches, ambiguites);
+
   journal_(
     "PRIME_SUGGESTIONS",
     "ALERTE_MAIL",
@@ -427,6 +440,10 @@ function traiterAlerteSuggestionsStreamingV1_(corps) {
         : "CinéMaison - V2 - " + ambiguites.length + " ambiguïté(s) à vérifier (" + plateforme + ")";
     MailApp.sendEmail({ to: destinataires, subject: sujet, htmlBody: corpsHtml });
   }
+
+  // V1.0 (10/09/2026, 18_RAPPORT_ECARTS_PLATEFORMES.gs) : voir note
+  // identique dans traiterAlerteSuggestionsPrimeV1_.
+  sauvegarderDernieresSuggestionsV1_(plateforme, fiches, ambiguites);
 
   journal_(
     plateforme + "_SUGGESTIONS",
