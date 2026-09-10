@@ -7,7 +7,27 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.3
+ * Version: 2.4
+ *
+ * Correctif V2.4 (10/09/2026) : 4 nouvelles actions pour Netflix/Disney+,
+ * équivalents génériques des actions Prime déjà existantes (paramétrées
+ * par corps.plateforme au lieu d'un fichier dédié par plateforme) --
+ * dépendent de 17_CONTROLE_STREAMING_GENERIQUE.gs (nouveau fichier) :
+ * - "alerteSuggestionsStreaming" : équivalent de "alerteSuggestionsPrime".
+ * - "lancerVerificationControleStreaming" : équivalent de
+ *   "lancerVerificationControlePrime" -- appelée par netflix.js/disney.js
+ *   juste après un envoi réussi vers CONTROLE_NETFLIX/CONTROLE_DISNEY.
+ * - "appliquerControleStreaming" : équivalent de "appliquerControlePrime"
+ *   -- appelée par api/controle-streaming.js (Vercel) suite à un vrai
+ *   clic sur la page de confirmation.
+ * - "alerteStatutInconnuStreaming" : nouvelle (n'existe pas côté Prime)
+ *   -- mail de vérification manuelle pour les fiches qu'un collecteur
+ *   n'a pas su classer (aucun équivalent Prime, dont les statuts sont
+ *   déjà tous couverts par motifs connus).
+ * Réutilise pour l'instant la même liste de destinataires que Prime
+ * ("AjoutAutoPrime") -- à séparer plus tard si besoin (nouvelle colonne
+ * dans DESTINATAIRES_EMAIL), aucune migration requise pour l'instant.
+ * Rien de ce qui concerne Prime n'a été modifié.
  *
  * Correctif V2.3 (08/09/2026) : lien "Fusionner avec une fiche
  * existante" ajouté à chaque suggestion -- pour les titres Prime écrits
@@ -148,7 +168,7 @@ const WEBHOOK_REENRICH_QUEUE_PROP_V1 = "CINEMAISON_WEBHOOK_REENRICH_QUEUE_V1";
 const WEBHOOK_REENRICH_HANDLER_V1 = "traiterFileReenrichissementWebhookV1";
 
 /**
- * Point d'entrée HTTP POST. Cinq formes de corps JSON acceptées :
+ * Point d'entrée HTTP POST. Neuf formes de corps JSON acceptées :
  *   1. { "secret": "...", "id": "FILM0123" }
  *      -> ré-enrichissement immédiat (inchangé depuis V1.0).
  *   2. { "secret": "...", "action": "updateDigestSettings",
@@ -167,6 +187,21 @@ const WEBHOOK_REENRICH_HANDLER_V1 = "traiterFileReenrichissementWebhookV1";
  *      -> lance l'ÉCRITURE réelle (appliquerResultatsPrimeOfficiel),
  *      appelé par api/appliquer-controle-prime.js (Vercel) suite à un
  *      vrai clic sur la page de confirmation.
+ *   6. { "secret": "...", "action": "alerteSuggestionsStreaming",
+ *        "plateforme": "NETFLIX"|"DISNEY", "fiches": [...], "ambiguites": [...] }
+ *      -> équivalent générique de la forme 3, pour Netflix/Disney+
+ *      (appelé par netflix.js/disney.js, en direct). V2.4 (10/09/2026).
+ *   7. { "secret": "...", "action": "lancerVerificationControleStreaming",
+ *        "plateforme": "NETFLIX"|"DISNEY", "confirmUrl": "..." }
+ *      -> équivalent générique de la forme 4. V2.4 (10/09/2026).
+ *   8. { "secret": "...", "action": "appliquerControleStreaming",
+ *        "plateforme": "NETFLIX"|"DISNEY" }
+ *      -> équivalent générique de la forme 5, appelé par api/controle-
+ *      streaming.js (Vercel). V2.4 (10/09/2026).
+ *   9. { "secret": "...", "action": "alerteStatutInconnuStreaming",
+ *        "plateforme": "NETFLIX"|"DISNEY", "fiches": [{titre, url}, ...] }
+ *      -> mail de vérification manuelle pour les fiches qu'un collecteur
+ *      n'a pas su classer (aucun équivalent Prime). V2.4 (10/09/2026).
  */
 function doPost(e) {
   try {
@@ -192,6 +227,22 @@ function doPost(e) {
 
     if (corps.action === "appliquerControlePrime") {
       return traiterAppliquerControlePrimeV1_(corps);
+    }
+
+    if (corps.action === "alerteSuggestionsStreaming") {
+      return traiterAlerteSuggestionsStreamingV1_(corps);
+    }
+
+    if (corps.action === "lancerVerificationControleStreaming") {
+      return traiterLancerVerificationControleStreamingV1_(corps);
+    }
+
+    if (corps.action === "appliquerControleStreaming") {
+      return traiterAppliquerControleStreamingV1_(corps);
+    }
+
+    if (corps.action === "alerteStatutInconnuStreaming") {
+      return traiterAlerteStatutInconnuStreamingV1_(corps);
     }
 
     const id = safeTrim_(corps.id || "");
@@ -337,6 +388,210 @@ function traiterAppliquerControlePrimeV1_(corps) {
 
   return reponseJsonWebhook_({ ok: true, resume: resume });
 }
+
+
+/**
+ * ============================================================
+ * NETFLIX / DISNEY+ (10/09/2026) -- équivalents génériques des 3
+ * actions Prime ci-dessus, paramétrées par corps.plateforme
+ * ("NETFLIX" | "DISNEY"). Dépend de 17_CONTROLE_STREAMING_GENERIQUE.gs.
+ * Réutilise la même clé de destinataires "AjoutAutoPrime" -- Ben
+ * pourra la scinder plus tard (ex. "ControleStreaming" dédiée dans
+ * DESTINATAIRES_EMAIL) s'il veut des listes de diffusion différentes ;
+ * aucune migration requise pour l'instant, le mail part simplement aux
+ * mêmes destinataires que les suggestions Prime.
+ * ============================================================
+ */
+
+/**
+ * Reçoit { secret, action: "alerteSuggestionsStreaming", plateforme,
+ * fiches: [...], ambiguites: [...] } depuis netflix.js/disney.js (appel
+ * direct au webhook). PUREMENT INFORMATIF : rien n'est écrit dans le
+ * Sheet ici.
+ */
+function traiterAlerteSuggestionsStreamingV1_(corps) {
+  const plateforme = String(corps.plateforme || "").trim();
+  const fiches = Array.isArray(corps.fiches) ? corps.fiches : [];
+  const ambiguites = Array.isArray(corps.ambiguites) ? corps.ambiguites : [];
+  if (fiches.length === 0 && ambiguites.length === 0) {
+    return reponseJsonWebhook_({ ok: false, error: "fiches et ambiguites vides" }, 400);
+  }
+
+  const destinataires = destinatairesPourService_("AjoutAutoPrime");
+  if (destinataires) {
+    const corpsHtml = construireHtmlSuggestionsPrimeV1_(fiches, ambiguites);
+    const sujet = fiches.length > 0 && ambiguites.length > 0
+      ? "CinéMaison - V2 - " + fiches.length + " suggestion(s) + " + ambiguites.length + " ambiguïté(s) (" + plateforme + ")"
+      : fiches.length > 0
+        ? "CinéMaison - V2 - " + fiches.length + " suggestion(s) d'ajout (" + plateforme + ")"
+        : "CinéMaison - V2 - " + ambiguites.length + " ambiguïté(s) à vérifier (" + plateforme + ")";
+    MailApp.sendEmail({ to: destinataires, subject: sujet, htmlBody: corpsHtml });
+  }
+
+  journal_(
+    plateforme + "_SUGGESTIONS",
+    "ALERTE_MAIL",
+    destinataires ? "OK" : "IGNORE_SANS_DESTINATAIRE",
+    fiches.length + " suggestion(s), " + ambiguites.length + " ambiguïté(s) : " +
+    fiches.concat(ambiguites).map(function(f) { return f.titre; }).join(", ")
+  );
+
+  return reponseJsonWebhook_({ ok: true, mailEnvoye: !!destinataires, nombreFiches: fiches.length, nombreAmbiguites: ambiguites.length });
+}
+
+/**
+ * Reçoit { secret, action: "lancerVerificationControleStreaming",
+ * plateforme, confirmUrl } -- lance la SIMULATION
+ * (verifierResultatsStreamingOfficielSansEcriture, 17_CONTROLE_
+ * STREAMING_GENERIQUE.gs), envoie le résumé par mail avec un bouton
+ * "Valider et appliquer".
+ */
+function traiterLancerVerificationControleStreamingV1_(corps) {
+  const plateforme = String(corps.plateforme || "").trim();
+  const resume = verifierResultatsStreamingOfficielSansEcriture(plateforme);
+
+  const destinataires = destinatairesPourService_("AjoutAutoPrime");
+  if (destinataires) {
+    const corpsHtml = construireHtmlResumeControleStreamingV1_(plateforme, resume, corps.confirmUrl);
+    MailApp.sendEmail({
+      to: destinataires,
+      subject: "CinéMaison - V2 - " + plateforme + " : " + resume.controlesValides + " contrôle(s) prêt(s) à appliquer",
+      htmlBody: corpsHtml,
+    });
+  }
+
+  journal_(
+    "CONTROLE_" + plateforme,
+    "VERIFICATION_AUTO",
+    destinataires ? "OK" : "IGNORE_SANS_DESTINATAIRE",
+    "Valides=" + resume.controlesValides + " | Changements=" + resume.changements +
+    " | AjoutsPlateforme=" + resume.ajoutsPlateforme + " | Erreurs=" + resume.erreurs
+  );
+
+  return reponseJsonWebhook_({ ok: true, resume: resume, mailEnvoye: !!destinataires });
+}
+
+/**
+ * Reçoit { secret, action: "appliquerControleStreaming", plateforme }
+ * -- appelé par api/controle-streaming.js (Vercel) suite à un vrai
+ * clic humain sur la page de confirmation. Lance
+ * appliquerResultatsStreamingOfficiel() pour de vrai (ÉCRITURE dans
+ * Films) et retourne le résumé.
+ */
+function traiterAppliquerControleStreamingV1_(corps) {
+  const plateforme = String(corps.plateforme || "").trim();
+  const resume = appliquerResultatsStreamingOfficiel(plateforme);
+
+  journal_(
+    "CONTROLE_" + plateforme,
+    "APPLICATION_VALIDEE",
+    "OK",
+    "Changements=" + resume.changements + " | AjoutsPlateforme=" + resume.ajoutsPlateforme +
+    " | Erreurs=" + resume.erreurs
+  );
+
+  return reponseJsonWebhook_({ ok: true, resume: resume });
+}
+
+/**
+ * Reçoit { secret, action: "alerteStatutInconnuStreaming", plateforme,
+ * fiches: [{titre, url}, ...] } -- fiches dont le statut n'a pas pu
+ * être classé par le collecteur (ex. page qui ne ressemble à rien de
+ * connu). Simple mail de vérification manuelle, rien n'est écrit.
+ */
+function traiterAlerteStatutInconnuStreamingV1_(corps) {
+  const plateforme = String(corps.plateforme || "").trim();
+  const fiches = Array.isArray(corps.fiches) ? corps.fiches : [];
+  if (fiches.length === 0) {
+    return reponseJsonWebhook_({ ok: false, error: "fiches vide" }, 400);
+  }
+
+  const destinataires = destinatairesPourService_("AjoutAutoPrime");
+  if (destinataires) {
+    const lignes = fiches.map(function(f) {
+      return '<tr><td style="padding:6px 0;border-bottom:1px solid #EFE7D6;font-family:Arial,sans-serif;font-size:13px">' +
+        '<a href="' + f.url + '" style="color:#B5622B;text-decoration:none">' + f.titre + '</a></td></tr>';
+    }).join("");
+    const corpsHtml =
+      '<!DOCTYPE html><html><head><meta charset="UTF-8"></head>' +
+      '<body style="margin:0;padding:0;background:#F5EFE0"><div style="background:#F5EFE0;padding:24px 12px">' +
+      '<div style="background:#FFFBF2;border-radius:8px;padding:28px 22px;max-width:480px;margin:0 auto;font-family:Georgia,serif">' +
+      '<div style="font-size:22px;font-weight:bold;color:#3A2E22">CINÉ<span style="color:#B5622B">MAISON</span></div>' +
+      '<div style="font-size:11px;letter-spacing:1.5px;color:#B5622B;margin-top:4px;font-family:Arial,sans-serif">' +
+      plateforme + ' &middot; STATUT INCONNU</div>' +
+      '<div style="border-top:1px solid #E3D9C4;margin:16px 0"></div>' +
+      '<p style="font-size:13px;color:#9A9182;font-family:Arial,sans-serif">' +
+      fiches.length + ' fiche(s) que le collecteur n\'a pas su classer -- à vérifier à la main :</p>' +
+      '<table role="presentation" width="100%" style="border-collapse:collapse">' + lignes + '</table>' +
+      '</div></div></body></html>';
+    MailApp.sendEmail({
+      to: destinataires,
+      subject: "CinéMaison - V2 - " + plateforme + " : " + fiches.length + " fiche(s) à statut inconnu",
+      htmlBody: corpsHtml,
+    });
+  }
+
+  journal_(
+    "CONTROLE_" + plateforme,
+    "STATUT_INCONNU",
+    destinataires ? "OK" : "IGNORE_SANS_DESTINATAIRE",
+    fiches.length + " fiche(s) : " + fiches.map(function(f) { return f.titre; }).join(", ")
+  );
+
+  return reponseJsonWebhook_({ ok: true, mailEnvoye: !!destinataires, nombreFiches: fiches.length });
+}
+
+/**
+ * Même habillage que construireHtmlResumeControlePrimeV1_ (Prime),
+ * généralisé avec le nom de la plateforme dans le bandeau.
+ */
+function construireHtmlResumeControleStreamingV1_(plateforme, resume, confirmUrl) {
+  const lignes = [
+    ["Contrôles valides", resume.controlesValides],
+    ["Dates validées", resume.datesValidees],
+    ["Sans alerte", resume.sansAlerte],
+    ["Conflits d'autre source protégés", resume.conflitsProteges],
+    ["Ajouts " + plateforme + " aux plateformes", resume.ajoutsPlateforme],
+    ["Changements de date", resume.changements],
+    ["Ignorés", resume.ignores],
+    ["Erreurs", resume.erreurs],
+  ].map(function(l) {
+    return '<tr>' +
+      '<td style="padding:6px 0;border-bottom:1px solid #EFE7D6;' +
+      'font-family:Arial,sans-serif;font-size:13px;color:#9A9182">' + l[0] + '</td>' +
+      '<td style="padding:6px 0;border-bottom:1px solid #EFE7D6;' +
+      'font-family:Arial,sans-serif;font-size:13px;color:#3A2E22;font-weight:bold;' +
+      'text-align:right">' + l[1] + '</td></tr>';
+  }).join("");
+
+  const bouton = confirmUrl
+    ? '<a href="' + confirmUrl +
+      '" style="display:inline-block;margin-top:16px;background:#B5622B;' +
+      'color:#FFFBF2;text-decoration:none;font-family:Arial,sans-serif;font-size:13px;' +
+      'font-weight:bold;padding:10px 16px;border-radius:5px">VALIDER ET APPLIQUER</a>'
+    : '<div style="font-size:12px;color:#9A9182;font-family:Arial,sans-serif;margin-top:16px">' +
+      'Lien de validation manquant -- lance appliquerResultatsStreamingOfficiel("' + plateforme + '") ' +
+      'à la main dans l\'éditeur Apps Script.</div>';
+
+  return (
+    '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+    '<meta name="color-scheme" content="light only">' +
+    '<meta name="supported-color-schemes" content="light only">' +
+    '</head><body style="margin:0;padding:0;background:#F5EFE0">' +
+    '<div style="background:#F5EFE0;padding:24px 12px">' +
+    '<div style="background:#FFFBF2;border-radius:8px;padding:28px 22px;' +
+    'max-width:480px;margin:0 auto;font-family:Georgia,serif">' +
+    '<div style="font-size:22px;font-weight:bold;color:#3A2E22">' +
+    'CINÉ<span style="color:#B5622B">MAISON</span></div>' +
+    '<div style="font-size:11px;letter-spacing:1.5px;color:#B5622B;' +
+    'margin-top:4px;font-family:Arial,sans-serif">CONTRÔLE ' + plateforme + ' &middot; SIMULATION</div>' +
+    '<div style="border-top:1px solid #E3D9C4;margin:16px 0"></div>' +
+    '<table role="presentation" width="100%" style="border-collapse:collapse">' + lignes + '</table>' +
+    bouton +
+    '</div></div></body></html>'
+  );
+}
+
 
 
 /**
