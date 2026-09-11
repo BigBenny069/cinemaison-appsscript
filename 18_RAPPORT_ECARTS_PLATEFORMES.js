@@ -55,7 +55,17 @@ function installerDeclencheurRapportEcartsV1() {
     .atHour(8)
     .create();
 
-  SpreadsheetApp.getUi().alert("Déclencheur quotidien installé (rapport d'écarts, ~8h).");
+  // Logger.log fonctionne dans tous les contextes (menu, exécution
+  // manuelle depuis l'éditeur, etc.) -- contrairement à getUi().alert(),
+  // qui ne marche que si lancé depuis un clic dans un menu du Sheet
+  // lui-même (erreur "Cannot call SpreadsheetApp.getUi() from this
+  // context" sinon, observé le 10/09/2026 en lançant depuis l'éditeur).
+  Logger.log("Déclencheur quotidien installé (rapport d'écarts, ~8h).");
+  try {
+    SpreadsheetApp.getUi().alert("Déclencheur quotidien installé (rapport d'écarts, ~8h).");
+  } catch (e) {
+    // Pas grave -- le message est déjà dans le journal d'exécution ci-dessus.
+  }
 }
 
 /**
