@@ -13,7 +13,19 @@
  *             DERNIERES_SUGGESTIONS_PLATEFORMES (voir 09_WEBHOOK.gs),
  *             donc toujours la donnée du dernier scan de chaque
  *             plateforme, même si le scan remonte à plusieurs jours.
- * Version : 1.0
+ * Version : 1.2
+ *
+ * Correctif V1.2 (11/09/2026) : vignettes (affiche 50x75) ajoutées sur
+ * les 3 sections du mail -- Partie 1 depuis Films.Affiche, Partie 2 et
+ * ambiguïtés depuis le champ "affiche" déjà sauvegardé par les
+ * collecteurs dans DERNIERES_SUGGESTIONS_PLATEFORMES. Même habillage
+ * que le mail de suggestions Prime existant.
+ *
+ * Correctif V1.1 (10/09/2026) : calculerEcartsRetraitV1_ ne fait plus
+ * planter tout le rapport si UNE plateforme a des données mal formées
+ * (résidu d'un ancien format sur CONTROLE_NETFLIX, constaté en usage
+ * réel) -- cette plateforme est maintenant simplement ignorée (avec
+ * une trace dans le journal), les autres continuent normalement.
  *
  * Correctif V1.0 (10/09/2026) : création initiale. Décidé avec Ben :
  * garder les deux parties dès le départ (plutôt que de débrancher la
@@ -138,7 +150,23 @@ function calculerEcartsRetraitV1_(plateforme) {
   const controle = classeur.getSheetByName(feuilleControle);
   if (!controle) return [];
 
-  const resultats = plateforme === "PRIME" ? lireResultatsPrimeV110_(controle) : lireResultatsStreamingV1_(controle);
+  // Ne doit JAMAIS faire planter tout le rapport pour les autres
+  // plateformes -- lireResultatsStreamingV1_/lireResultatsPrimeV110_
+  // sont volontairement stricts (ils refusent de lire des données mal
+  // formées plutôt que de deviner), ce qui est correct pour leur usage
+  // d'origine mais pas acceptable ici : un résidu d'ancien format sur
+  // UNE plateforme (constaté le 10/09/2026 sur CONTROLE_NETFLIX) ne
+  // doit ignorer que CETTE plateforme, jamais interrompre les autres.
+  let resultats;
+  try {
+    resultats = plateforme === "PRIME" ? lireResultatsPrimeV110_(controle) : lireResultatsStreamingV1_(controle);
+  } catch (e) {
+    Logger.log(
+      "RAPPORT_ECARTS : " + feuilleControle + " ignorée (données mal formées, probablement un résidu d'un " +
+      "ancien format) -- " + e.message
+    );
+    return [];
+  }
   if (!resultats) return []; // pas de scan complet enregistré -- rien à comparer
 
   const idsScannes = {};
@@ -156,7 +184,7 @@ function calculerEcartsRetraitV1_(plateforme) {
     if (!estDeCettePlateforme(ligne[hFilms.Plateforme])) continue;
     const id = String(ligne[hFilms.ID] || "").trim();
     if (!id || idsScannes[id]) continue;
-    manquants.push({ id: id, titre: titre });
+    manquants.push({ id: id, titre: titre, affiche: hFilms.Affiche !== undefined ? String(ligne[hFilms.Affiche] || "") : "" });
   }
   return manquants;
 }
@@ -235,6 +263,15 @@ function construireHtmlRapportEcartsV1_(parPlateforme) {
   const motDePasse = String(lireConfig_("AddFilmPassword", ""));
   const baseUrl = "https://cinemaison-v2.vercel.app";
 
+  // Même vignette (50x75, coins arrondis, placeholder gris si pas
+  // d'affiche) que le mail de suggestions Prime -- même habillage
+  // partout.
+  function vignetteHtml(urlAffiche) {
+    return urlAffiche
+      ? '<img src="' + urlAffiche + '" width="50" height="75" style="border-radius:4px;object-fit:cover;flex-shrink:0;margin-right:12px" alt="">'
+      : '<div style="width:50px;height:75px;border-radius:4px;background:#E3D9C4;flex-shrink:0;margin-right:12px"></div>';
+  }
+
   const sections = parPlateforme.map(function (p) {
     if (p.manquants.length === 0 && p.suggestions.length === 0 && p.ambiguites.length === 0) return "";
 
@@ -245,8 +282,11 @@ function construireHtmlRapportEcartsV1_(parPlateforme) {
       html += p.manquants.map(function (m) {
         const retirerUrl = baseUrl + "/api/confirm?page=remove&id=" + encodeURIComponent(m.id) +
           "&titre=" + encodeURIComponent(m.titre) + "&pw=" + encodeURIComponent(motDePasse);
-        return '<div style="padding:6px 0;border-bottom:1px solid #EFE7D6;font-size:13px;color:#3A2E22;font-family:Arial,sans-serif">' +
-          m.titre + ' (' + m.id + ') -- <a href="' + retirerUrl + '" style="color:#B5622B">Retirer de CinéMaison</a></div>';
+        return '<div style="display:flex;align-items:flex-start;padding:8px 0;border-bottom:1px solid #EFE7D6">' +
+          vignetteHtml(m.affiche) +
+          '<div style="font-size:13px;color:#3A2E22;font-family:Arial,sans-serif">' +
+          m.titre + ' (' + m.id + ')<br><a href="' + retirerUrl + '" style="color:#B5622B">Retirer de CinéMaison</a>' +
+          '</div></div>';
       }).join("");
     }
 
@@ -257,17 +297,23 @@ function construireHtmlRapportEcartsV1_(parPlateforme) {
           .concat(f.confirmUrl ? ['<a href="' + f.confirmUrl + '" style="color:#B5622B">Ajouter</a>'] : [])
           .concat(f.ignorerUrl ? ['<a href="' + f.ignorerUrl + '" style="color:#9A9182">Ignorer</a>'] : [])
           .concat(f.fusionnerUrl ? ['<a href="' + f.fusionnerUrl + '" style="color:#9A9182">Fusionner</a>'] : []);
-        return '<div style="padding:6px 0;border-bottom:1px solid #EFE7D6;font-size:13px;color:#3A2E22;font-family:Arial,sans-serif">' +
-          f.titre + (f.annee ? ' (' + f.annee + ')' : '') + ' -- ' + liens.join(' &middot; ') + '</div>';
+        return '<div style="display:flex;align-items:flex-start;padding:8px 0;border-bottom:1px solid #EFE7D6">' +
+          vignetteHtml(f.affiche) +
+          '<div style="font-size:13px;color:#3A2E22;font-family:Arial,sans-serif">' +
+          f.titre + (f.annee ? ' (' + f.annee + ')' : '') + '<br>' + liens.join(' &middot; ') +
+          '</div></div>';
       }).join("");
     }
 
     if (p.ambiguites.length > 0) {
       html += '<div style="font-size:12px;color:#9A9182;margin-top:10px">AMBIGUÏTÉS (' + p.ambiguites.length + ')</div>';
       html += p.ambiguites.map(function (a) {
-        return '<div style="padding:6px 0;border-bottom:1px solid #EFE7D6;font-size:13px;color:#3A2E22;font-family:Arial,sans-serif">' +
+        return '<div style="display:flex;align-items:flex-start;padding:8px 0;border-bottom:1px solid #EFE7D6">' +
+          vignetteHtml(a.affiche) +
+          '<div style="font-size:13px;color:#3A2E22;font-family:Arial,sans-serif">' +
           a.titre + ' -- ' + (a.raison || '') +
-          (a.ignorerUrl ? ' -- <a href="' + a.ignorerUrl + '" style="color:#9A9182">Validé, c\'est normal</a>' : '') + '</div>';
+          (a.ignorerUrl ? '<br><a href="' + a.ignorerUrl + '" style="color:#9A9182">Validé, c\'est normal</a>' : '') +
+          '</div></div>';
       }).join("");
     }
 
