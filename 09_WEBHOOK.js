@@ -7,7 +7,15 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.6
+ * Version: 2.7
+ *
+ * Correctif V2.7 (11/09/2026) : construireHtmlSuggestionsPrimeV1_
+ * affichait toujours "PRIME" et "Prime Video" en dur dans l'en-tête et
+ * le texte d'intro du mail, même pour les suggestions Netflix/Disney+
+ * (constaté en usage réel -- le sujet du mail était correct, mais pas
+ * le contenu). Accepte maintenant un 3e paramètre plateforme. Même
+ * correctif sur la section ambiguïtés, qui ne lisait que
+ * dureePrimeMinutes (jamais dureeNetflixMinutes/dureeDisneyMinutes).
  *
  * Correctif V2.6 (11/09/2026) : relancerVerificationEtMailManuelV1() --
  * secours quand l'appel webhook depuis prime.js/netflix.js/disney.js
@@ -372,7 +380,7 @@ function traiterAlerteSuggestionsPrimeV1_(corps) {
 
   const destinataires = destinatairesPourService_("AjoutAutoPrime");
   if (destinataires) {
-    const corpsHtml = construireHtmlSuggestionsPrimeV1_(fiches, ambiguites);
+    const corpsHtml = construireHtmlSuggestionsPrimeV1_(fiches, ambiguites, "PRIME");
     const sujet = fiches.length > 0 && ambiguites.length > 0
       ? "CinéMaison - V2 - " + fiches.length + " suggestion(s) + " + ambiguites.length + " ambiguïté(s) (Prime)"
       : fiches.length > 0
@@ -485,7 +493,7 @@ function traiterAlerteSuggestionsStreamingV1_(corps) {
 
   const destinataires = destinatairesPourService_("AjoutAutoPrime");
   if (destinataires) {
-    const corpsHtml = construireHtmlSuggestionsPrimeV1_(fiches, ambiguites);
+    const corpsHtml = construireHtmlSuggestionsPrimeV1_(fiches, ambiguites, plateforme);
     const sujet = fiches.length > 0 && ambiguites.length > 0
       ? "CinéMaison - V2 - " + fiches.length + " suggestion(s) + " + ambiguites.length + " ambiguïté(s) (" + plateforme + ")"
       : fiches.length > 0
@@ -724,8 +732,11 @@ function construireHtmlResumeControlePrimeV1_(resume, confirmUrl) {
  * vérifier rapidement de quoi il s'agit avant de décider de l'ajouter
  * ou non depuis l'app.
  */
-function construireHtmlSuggestionsPrimeV1_(fiches, ambiguites) {
+function construireHtmlSuggestionsPrimeV1_(fiches, ambiguites, plateforme) {
   ambiguites = ambiguites || [];
+  plateforme = plateforme || "PRIME";
+  const LABELS_HUMAINS_V1 = { "PRIME": "Prime Video", "NETFLIX": "Netflix", "DISNEY": "Disney+" };
+  const labelHumain = LABELS_HUMAINS_V1[plateforme] || plateforme;
 
   let lignes = "";
   fiches.forEach(function(f) {
@@ -776,8 +787,12 @@ function construireHtmlSuggestionsPrimeV1_(fiches, ambiguites) {
 
   let lignesAmbigues = "";
   ambiguites.forEach(function(a) {
-    const dureePrime = a.dureePrimeMinutes
-      ? Math.floor(a.dureePrimeMinutes / 60) + "h" + String(a.dureePrimeMinutes % 60).padStart(2, "0")
+    // Le nom exact du champ diffère par collecteur (dureePrimeMinutes,
+    // dureeNetflixMinutes, dureeDisneyMinutes) -- on prend le premier
+    // trouvé plutôt que de supposer lequel, pour rester générique.
+    const dureeAmbigueMinutes = a.dureePrimeMinutes ?? a.dureeNetflixMinutes ?? a.dureeDisneyMinutes;
+    const dureePrime = dureeAmbigueMinutes
+      ? Math.floor(dureeAmbigueMinutes / 60) + "h" + String(dureeAmbigueMinutes % 60).padStart(2, "0")
       : "introuvable";
     const candidatsHtml = (a.candidats || []).map(function(c) {
       return c.id + " (" + (c.annee || "?") + ", durée Sheet : " + (c.duree || "?") + ")";
@@ -793,7 +808,7 @@ function construireHtmlSuggestionsPrimeV1_(fiches, ambiguites) {
       '<div style="padding:10px 0;border-bottom:1px solid #EFE7D6">' +
       '<span style="font-family:Georgia,serif;font-size:15px;color:#3A2E22;font-weight:bold">' + escaperHtmlDigestV1_(a.titre) + '</span>' +
       '<div style="font-size:12px;color:#9A9182;font-family:Arial,sans-serif;margin-top:2px">' +
-      'Durée Prime : ' + dureePrime + ' &middot; candidats : ' + escaperHtmlDigestV1_(candidatsHtml) +
+      'Durée ' + labelHumain + ' : ' + dureePrime + ' &middot; candidats : ' + escaperHtmlDigestV1_(candidatsHtml) +
       '</div><div>' + boutonValide + '</div></div>';
   });
 
@@ -805,7 +820,7 @@ function construireHtmlSuggestionsPrimeV1_(fiches, ambiguites) {
 
   const sectionSuggestions = fiches.length > 0
     ? '<div style="font-size:12px;color:#9A9182;font-family:Arial,sans-serif;margin-bottom:12px">' +
-      'Ces titres sont dans tes favoris Prime Video mais absents de CinéMaison. ' +
+      'Ces titres sont dans tes favoris ' + labelHumain + ' mais absents de CinéMaison. ' +
       'RIEN N\'A ÉTÉ CRÉÉ AUTOMATIQUEMENT -- clique "Ajouter à CinéMaison" pour ' +
       'créer la fiche directement, "Ignorer" pour ne plus jamais en entendre parler, ' +
       'ou "Fusionner avec une fiche existante" si ce titre est déjà dans CinéMaison ' +
@@ -835,7 +850,7 @@ function construireHtmlSuggestionsPrimeV1_(fiches, ambiguites) {
     'CINÉ<span style="color:#B5622B">MAISON</span></div>' +
     '<div style="font-size:11px;letter-spacing:1.5px;color:#B5622B;' +
     'margin-top:4px;font-family:Arial,sans-serif">' +
-    'PRIME &middot; ' + sousTitre + '</div>' +
+    plateforme + ' &middot; ' + sousTitre + '</div>' +
     '<div style="border-top:1px solid #E3D9C4;margin:16px 0"></div>' +
     sectionSuggestions +
     sectionAmbiguites +
