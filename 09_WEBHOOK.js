@@ -7,7 +7,17 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.5
+ * Version: 2.6
+ *
+ * Correctif V2.6 (11/09/2026) : relancerVerificationEtMailManuelV1() --
+ * secours quand l'appel webhook depuis prime.js/netflix.js/disney.js
+ * échoue en "fetch failed" (constaté en usage réel : le round-trip
+ * réseau prend trop de temps sur les gros volumes -- CONTROLE_PRIME/
+ * NETFLIX avec 200+ lignes ont échoué, CONTROLE_DISNEY avec 83 lignes
+ * est passé sans souci). L'écriture dans CONTROLE_<PLATEFORME> avait
+ * déjà réussi dans ce cas (c'est bien un problème sur cet appel
+ * précis, rien n'est perdu) -- cette fonction relance la simulation +
+ * le mail SANS repasser par le réseau (appel direct, depuis l'éditeur).
  *
  * Correctif V2.5 (10/09/2026) : traiterAlerteSuggestionsPrimeV1_ et
  * traiterAlerteSuggestionsStreamingV1_ sauvegardent maintenant aussi
@@ -310,6 +320,49 @@ function traiterMiseAJourReglagesDigestV1_(corps) {
  * mail pour tout le lot d'un run). PUREMENT INFORMATIF : rien n'est
  * écrit dans le Sheet ici.
  */
+/**
+ * Secours manuel : relance "simulation + mail de validation" SANS
+ * passer par le réseau (évite le "fetch failed" observé sur les gros
+ * volumes -- voir correctif V2.6). À lancer depuis l'éditeur si tu
+ * n'as pas reçu le mail "contrôle(s) prêt(s) à appliquer" après un
+ * run de prime.js/netflix.js/disney.js -- l'écriture dans
+ * CONTROLE_<PLATEFORME> avait déjà réussi, seul cet appel a raté.
+ *
+ * Utilisation : cette fonction attend un paramètre, donc pas
+ * sélectionnable directement dans le menu "Exécuter" -- lance plutôt
+ * l'une des 3 fonctions sans paramètre juste en dessous.
+ */
+function relancerVerificationEtMailManuelV1(plateforme) {
+  const p = String(plateforme || "").trim().toUpperCase();
+  const motDePasse = String(lireConfig_("AddFilmPassword", ""));
+  if (!motDePasse) {
+    Logger.log("AddFilmPassword absent de CONFIG -- le lien 'Valider et appliquer' du mail ne fonctionnera pas sans ça.");
+  }
+
+  const suffixePlateforme = p === "PRIME" ? "" : "&plateforme=" + encodeURIComponent(p);
+  const confirmUrl = "https://cinemaison-v2.vercel.app/api/confirm?page=apply" + suffixePlateforme + "&pw=" + encodeURIComponent(motDePasse);
+
+  if (p === "PRIME") {
+    traiterLancerVerificationControlePrimeV1_({ confirmUrl: confirmUrl });
+  } else {
+    traiterLancerVerificationControleStreamingV1_({ plateforme: p, confirmUrl: confirmUrl });
+  }
+  Logger.log("Relance manuelle terminée pour " + p + " -- vérifie ta boîte mail dans les prochaines minutes.");
+}
+
+function relancerVerificationEtMailPrime() {
+  relancerVerificationEtMailManuelV1("PRIME");
+}
+
+function relancerVerificationEtMailNetflix() {
+  relancerVerificationEtMailManuelV1("NETFLIX");
+}
+
+function relancerVerificationEtMailDisney() {
+  relancerVerificationEtMailManuelV1("DISNEY");
+}
+
+
 function traiterAlerteSuggestionsPrimeV1_(corps) {
   const fiches = Array.isArray(corps.fiches) ? corps.fiches : [];
   const ambiguites = Array.isArray(corps.ambiguites) ? corps.ambiguites : [];
