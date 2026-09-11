@@ -3,7 +3,13 @@
  * CinéMaison V4
  * Script : 02_TMDB.gs
  * Rôle   : Recherche et enrichissement TMDb fiabilisés
- * Version: 4.6.1
+ * Version: 4.6.2
+ *
+ * Correctif V4.6.2 (11/09/2026) : nouvelle fonction
+ * resoudreTmdbIdDepuisImdb_ (endpoint TMDb /find) -- permet de
+ * résoudre un ID IMDb en ID TMDb, utilisée par tmdbIdDepuisLetterboxdV1_
+ * (05_ENRICHISSEMENT.gs) quand une URL Letterboxd de la forme
+ * .../imdb/ttXXXXXXX/ est fournie.
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs
  *
  * Correctif V4.6.1 (point 9) :
@@ -411,6 +417,42 @@ function choisirMeilleureVideo_(videos) {
  * Appelle TMDb jusqu'à trois fois en cas d'incident temporaire.
  * Les codes fonctionnels (ex. 401 ou 404) ne sont jamais rejoués.
  */
+/**
+ * Résout un ID IMDb (format "tt1234567") en ID TMDb, via l'endpoint
+ * officiel /find de TMDb -- utilisé quand une URL Letterboxd de la
+ * forme letterboxd.com/imdb/ttXXXXXXX/ est fournie dans URLLetterboxd
+ * (voir tmdbIdDepuisLetterboxdV1_ dans 05_ENRICHISSEMENT.gs). Retourne
+ * l'ID TMDb (string) ou null si rien trouvé.
+ */
+function resoudreTmdbIdDepuisImdb_(imdbId, typeAttendu, apiKey) {
+  if (!/^tt\d+$/i.test(String(imdbId || "").trim())) return null;
+
+  const url =
+    "https://api.themoviedb.org/3/find/" + encodeURIComponent(imdbId) +
+    "?api_key=" + encodeURIComponent(apiKey) +
+    "&external_source=imdb_id";
+
+  const reponse = fetchTMDbAvecRetry_(url, "find IMDb " + imdbId);
+  if (reponse.getResponseCode() !== 200) return null;
+
+  const json = parserJsonTMDb_(reponse.getContentText(), "find IMDb " + imdbId);
+
+  // Préfère le type attendu (Film -> movie_results, Série -> tv_results)
+  // quand on le connaît, sinon prend ce qui est disponible.
+  const veutSerie = normalizeText_(typeAttendu || "").indexOf("serie") >= 0;
+  const listes = veutSerie
+    ? [json.tv_results, json.movie_results]
+    : [json.movie_results, json.tv_results];
+
+  for (const liste of listes) {
+    if (Array.isArray(liste) && liste.length > 0 && liste[0] && liste[0].id) {
+      return String(liste[0].id);
+    }
+  }
+  return null;
+}
+
+
 function fetchTMDbAvecRetry_(url, contexte) {
   const maximumTentatives = 3;
   const codesTemporaires = [429, 500, 502, 503, 504];
