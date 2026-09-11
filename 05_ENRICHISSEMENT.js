@@ -3,7 +3,17 @@
  * CinéMaison V4
  * Script : 05_ENRICHISSEMENT.gs
  * Rôle   : Orchestration TMDb + Letterboxd
- * Version: 4.6.2
+ * Version: 4.6.3
+ *
+ * Correctif V4.6.3 (11/09/2026) : nouvelle fonction
+ * tmdbIdDepuisLetterboxdV1_ -- si aucun TMDbID n'est saisi à la main,
+ * un lien Letterboxd de la forme .../tmdb/ID/ ou .../imdb/ttID/ dans
+ * URLLetterboxd est maintenant utilisé pour déduire (ou résoudre via
+ * TMDb, cf resoudreTmdbIdDepuisImdb_ dans 02_TMDB.gs) l'ID TMDb à
+ * utiliser en priorité -- évite de dépendre de la recherche floue par
+ * titre pour les titres dont la formulation la fait échouer. Un lien
+ * Letterboxd "normal" (/film/...) continue de ne servir qu'à la
+ * note/aux votes, comportement inchangé.
  *
  * Correctif V4.6.2 (07/09/2026) : rien n'appelait jamais resoudreErreur_
  * pour le module "ENRICHISSEMENT" -- une erreur (FILM_LIGNE_XXX ou
@@ -995,6 +1005,38 @@ function preparerLigneEnrichissementV4_(
 
 
 
+/**
+ * Si aucun TMDbID n'est saisi mais que URLLetterboxd est un lien
+ * letterboxd.com/tmdb/ID/ ou letterboxd.com/imdb/ttID/ (redirections
+ * que Letterboxd fournit lui-même), en extrait -- ou résout via TMDb --
+ * un ID TMDb directement utilisable, pour sauter la recherche floue par
+ * titre. Retourne "" si rien d'exploitable (comportement inchangé dans
+ * ce cas -- un lien Letterboxd "normal" /film/... continue de ne
+ * servir qu'à la note/aux votes, comme avant).
+ */
+function tmdbIdDepuisLetterboxdV1_(urlLetterboxd, typeAttendu) {
+  const url = String(urlLetterboxd || "").trim();
+  if (!url) return "";
+
+  const matchTmdb = url.match(/letterboxd\.com\/tmdb\/(\d+)/i);
+  if (matchTmdb) return matchTmdb[1];
+
+  const matchImdb = url.match(/letterboxd\.com\/imdb\/(tt\d+)/i);
+  if (matchImdb) {
+    const apiKey = lireConfig_("TMDbApiKey", "");
+    if (!apiKey) return "";
+    try {
+      return resoudreTmdbIdDepuisImdb_(matchImdb[1], typeAttendu, apiKey) || "";
+    } catch (e) {
+      Logger.log("Résolution IMDb->TMDb échouée pour " + matchImdb[1] + " : " + e.message);
+      return "";
+    }
+  }
+
+  return "";
+}
+
+
 function enrichirUneLigneV4_(
   sheet,
   rowNumber,
@@ -1032,6 +1074,18 @@ function enrichirUneLigneV4_(
 
   let tmdbId =
     get_(row, h, "TMDbID");
+
+  // Correctif V?? (11/09/2026) : si aucun TMDbID n'est saisi, tente de
+  // le déduire d'une URL Letterboxd /tmdb/ ou /imdb/ (voir
+  // tmdbIdDepuisLetterboxdV1_ ci-dessus) -- sinon comportement
+  // inchangé, la recherche floue par titre prend le relais comme avant.
+  if (!tmdbId) {
+    const tmdbIdDepuisLB = tmdbIdDepuisLetterboxdV1_(get_(row, h, "URLLetterboxd"), type);
+    if (tmdbIdDepuisLB) {
+      tmdbId = tmdbIdDepuisLB;
+      Logger.log("TMDbID déduit d'un lien Letterboxd pour la ligne " + rowNumber + " : " + tmdbId);
+    }
+  }
 
   let imdbId =
     get_(row, h, "IMDbID");
