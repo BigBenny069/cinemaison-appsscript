@@ -33,7 +33,7 @@
  *    "motDePasse" dans secrets-local.json) -- nécessaire pour que les
  *    liens "Retirer de CinéMaison" du mail fonctionnent (Apps Script
  *    ne connaît pas ce mot de passe autrement).
- * 2. Lance installerDeclencheurRapportEcartsV1_() une fois depuis
+ * 2. Lance installerDeclencheurRapportEcartsV1() une fois depuis
  *    l'éditeur -- crée le déclencheur quotidien.
  */
 
@@ -44,12 +44,12 @@ const RAPPORT_ECARTS_SUGGESTIONS_FEUILLE_V1 = "DERNIERES_SUGGESTIONS_PLATEFORMES
  * À lancer UNE SEULE FOIS depuis l'éditeur -- crée le déclencheur
  * quotidien (autour de 8h, heure du fuseau du script).
  */
-function installerDeclencheurRapportEcartsV1_() {
+function installerDeclencheurRapportEcartsV1() {
   ScriptApp.getProjectTriggers()
-    .filter(function (t) { return t.getHandlerFunction() === "genererEtEnvoyerRapportEcartsV1_"; })
+    .filter(function (t) { return t.getHandlerFunction() === "genererEtEnvoyerRapportEcartsV1"; })
     .forEach(function (t) { ScriptApp.deleteTrigger(t); });
 
-  ScriptApp.newTrigger("genererEtEnvoyerRapportEcartsV1_")
+  ScriptApp.newTrigger("genererEtEnvoyerRapportEcartsV1")
     .timeBased()
     .everyDays(1)
     .atHour(8)
@@ -63,7 +63,7 @@ function installerDeclencheurRapportEcartsV1_() {
  * depuis l'éditeur pour tester). Calcule les écarts des 3 plateformes
  * et envoie un mail unique s'il y a quelque chose à signaler.
  */
-function genererEtEnvoyerRapportEcartsV1_() {
+function genererEtEnvoyerRapportEcartsV1() {
   const parPlateforme = RAPPORT_ECARTS_PLATEFORMES_V1.map(function (plateforme) {
     return {
       plateforme: plateforme,
