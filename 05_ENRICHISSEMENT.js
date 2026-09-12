@@ -3,7 +3,13 @@
  * CinéMaison V4
  * Script : 05_ENRICHISSEMENT.gs
  * Rôle   : Orchestration TMDb + Letterboxd
- * Version: 4.6.3
+ * Version: 4.6.4
+ *
+ * Correctif V4.6.4 (11/09/2026) : l'IMDbID saisi à la main (nouveau
+ * champ éditable depuis l'app) peut maintenant aussi déclencher
+ * l'enrichissement à lui seul, résolu en TMDbID via
+ * resoudreTmdbIdDepuisImdb_ (02_TMDB.gs) -- avant ce correctif, seul un
+ * TMDbID (saisi ou déduit d'un lien Letterboxd) le pouvait.
  *
  * Correctif V4.6.3 (11/09/2026) : nouvelle fonction
  * tmdbIdDepuisLetterboxdV1_ -- si aucun TMDbID n'est saisi à la main,
@@ -1075,20 +1081,33 @@ function enrichirUneLigneV4_(
   let tmdbId =
     get_(row, h, "TMDbID");
 
+  let imdbId =
+    get_(row, h, "IMDbID");
+
   // Correctif V?? (11/09/2026) : si aucun TMDbID n'est saisi, tente de
-  // le déduire d'une URL Letterboxd /tmdb/ ou /imdb/ (voir
-  // tmdbIdDepuisLetterboxdV1_ ci-dessus) -- sinon comportement
-  // inchangé, la recherche floue par titre prend le relais comme avant.
+  // le déduire, dans l'ordre : 1) une URL Letterboxd /tmdb/ ou /imdb/
+  // (voir tmdbIdDepuisLetterboxdV1_ ci-dessus), 2) l'IMDbID lui-même
+  // s'il a été saisi à la main (résolu en ID TMDb via l'API TMDb) --
+  // sinon comportement inchangé, la recherche floue par titre prend le
+  // relais comme avant.
   if (!tmdbId) {
     const tmdbIdDepuisLB = tmdbIdDepuisLetterboxdV1_(get_(row, h, "URLLetterboxd"), type);
     if (tmdbIdDepuisLB) {
       tmdbId = tmdbIdDepuisLB;
       Logger.log("TMDbID déduit d'un lien Letterboxd pour la ligne " + rowNumber + " : " + tmdbId);
+    } else if (/^tt\d+$/i.test(String(imdbId || "").trim())) {
+      try {
+        const apiKey = lireConfig_("TMDbApiKey", "");
+        const idResolu = apiKey ? resoudreTmdbIdDepuisImdb_(imdbId, type, apiKey) : null;
+        if (idResolu) {
+          tmdbId = idResolu;
+          Logger.log("TMDbID déduit de l'IMDbID saisi pour la ligne " + rowNumber + " : " + tmdbId);
+        }
+      } catch (e) {
+        Logger.log("Résolution IMDbID -> TMDbID échouée pour la ligne " + rowNumber + " : " + e.message);
+      }
     }
   }
-
-  let imdbId =
-    get_(row, h, "IMDbID");
 
   let titreOriginal =
     get_(row, h, "TitreOriginal");
