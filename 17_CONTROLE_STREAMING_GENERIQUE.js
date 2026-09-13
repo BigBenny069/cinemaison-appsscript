@@ -5,7 +5,12 @@
  * Rôle    : Diagnostic et import sécurisé des résultats officiels
  *           Netflix / Disney+ (équivalent générique de
  *           11_CONTROLE_PRIME_OFFICIEL.gs, laissé intact pour Prime).
- * Version : 1.0
+ * Version : 1.1
+ *
+ * Correctif V1.1 (13/09/2026) : traiterResultatsStreamingOfficielV1_
+ * collecte maintenant aussi le détail par catégorie (id/titre/durée/
+ * type/affiche), purement additif -- alimente la page "Voir le
+ * détail" du mail de contrôle (voir 09_WEBHOOK.gs).
  *
  * Correctif V1.0 (10/09/2026) : création initiale. Reprend exactement
  * les mêmes principes de sécurité que 11_CONTROLE_PRIME_OFFICIEL.gs
@@ -155,6 +160,21 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
   let ajoutsPlateforme = 0;
   let changements = 0;
 
+  // Correctif V1.3 (13/09/2026) : voir note identique dans
+  // 11_CONTROLE_PRIME_OFFICIEL.gs -- purement additif.
+  const details = { sansAlerte: [], conflitsProteges: [], datesValidees: [], ignores: [], erreurs: [] };
+  function detailFiche_(f) {
+    if (!f) return { id: idFilm };
+    return {
+      id: idFilm,
+      titre: f.valeurs[hFilms.Titre] || "",
+      duree: hFilms.Duree !== undefined ? (f.valeurs[hFilms.Duree] || "") : "",
+      type: hFilms.Type !== undefined ? (f.valeurs[hFilms.Type] || "") : "",
+      affiche: hFilms.Affiche !== undefined ? (f.valeurs[hFilms.Affiche] || "") : "",
+      plateforme: config.libellePlateforme,
+    };
+  }
+
   Logger.log("===== IMPORT " + config.libellePlateforme + " OFFICIEL V1.0 =====");
   Logger.log("Mode : " + (ecrire ? "ÉCRITURE" : "SIMULATION SANS ÉCRITURE"));
   Logger.log("En-tête détecté en N" + contexte.resultats.ligneEntete);
@@ -168,12 +188,14 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
     if (!film) {
       Logger.log("IGNORÉ | ID absent de Films : " + idFilm);
       ignores++;
+      details.ignores.push({ id: idFilm, raison: "ID absent de Films" });
       continue;
     }
 
     if (!estPlateformeStreamingV1_(config, film.valeurs[hFilms.Plateforme])) {
       Logger.log("IGNORÉ | " + idFilm + " | plateforme différente de " + config.libellePlateforme);
       ignores++;
+      details.ignores.push(Object.assign(detailFiche_(film), { raison: "plateforme différente de " + config.libellePlateforme }));
       continue;
     }
 
@@ -182,6 +204,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
     if (statut !== "AUCUNE_ALERTE" && statut !== "DATE_DETECTEE") {
       Logger.log("IGNORÉ SANS EFFACEMENT | " + idFilm + " | statut=" + statut);
       ignores++;
+      details.ignores.push(Object.assign(detailFiche_(film), { raison: "statut=" + statut }));
       continue;
     }
 
@@ -189,6 +212,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
     if (!controleLe) {
       Logger.log("ERREUR HORODATAGE | " + idFilm + " | ControleLe invalide");
       erreurs++;
+      details.erreurs.push(Object.assign(detailFiche_(film), { raison: "ControleLe invalide" }));
       continue;
     }
 
@@ -200,6 +224,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
         " jours | contrôle=" + formaterDateStreamingV1_(jourControle)
       );
       erreurs++;
+      details.erreurs.push(Object.assign(detailFiche_(film), { raison: "résultat trop ancien (" + ageResultat + " jours)" }));
       continue;
     }
     controlesValides++;
@@ -211,6 +236,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
 
     if (statut === "AUCUNE_ALERTE") {
       sansAlerte++;
+      details.sansAlerte.push(detailFiche_(film));
       Logger.log(
         "SANS ALERTE | " + idFilm + " | ligne " + film.ligne + " | date existante conservée" +
         (plateformeAjoutee ? " | " + config.libellePlateforme + " sera ajoutée aux plateformes" : "")
@@ -231,6 +257,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
     if (!isFinite(jours) || jours < 0 || jours > 60) {
       Logger.log("ERREUR VALIDATION | " + idFilm + " | joursRestants=" + resultat[hResultats.JoursRestants]);
       erreurs++;
+      details.erreurs.push(Object.assign(detailFiche_(film), { raison: "joursRestants invalide" }));
       continue;
     }
 
@@ -238,6 +265,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
     if (!dateRetrait) {
       Logger.log("ERREUR DATE | " + idFilm);
       erreurs++;
+      details.erreurs.push(Object.assign(detailFiche_(film), { raison: "date invalide" }));
       continue;
     }
 
@@ -248,6 +276,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
         " | différence=" + difference + " | contrôle=" + formaterDateStreamingV1_(jourControle)
       );
       erreurs++;
+      details.erreurs.push(Object.assign(detailFiche_(film), { raison: "incohérence jours/date" }));
       continue;
     }
 
@@ -258,6 +287,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
 
     if (autreSourceProtegee) {
       conflitsProteges++;
+      details.conflitsProteges.push(Object.assign(detailFiche_(film), { raisonConflit: "source conservée : " + ancienneSource }));
       Logger.log(
         "CONFLIT PROTÉGÉ | " + idFilm + " | ligne " + film.ligne +
         " | source conservée=" + ancienneSource +
@@ -275,6 +305,10 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
     datesValidees++;
     const dateChangee = !memeDateStreamingV1_(ancienneDate, dateRetrait);
     if (dateChangee) changements++;
+    details.datesValidees.push(Object.assign(detailFiche_(film), {
+      dateRetrait: formaterDateStreamingV1_(dateRetrait),
+      changee: dateChangee,
+    }));
     Logger.log(
       "DATE VALIDÉE | " + idFilm + " | ligne " + film.ligne + " | " +
       formaterDateStreamingV1_(dateRetrait) + (dateChangee ? " | changement" : " | identique")
@@ -323,6 +357,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
     changements: changements,
     ignores: ignores,
     erreurs: erreurs,
+    details: details,
   };
 }
 
