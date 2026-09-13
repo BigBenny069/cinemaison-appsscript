@@ -3,7 +3,7 @@
  * CinéMaison V4
  * Script : 01_UTILS.gs
  * Rôle   : Utilitaires communs sécurisés
- * Version: 4.1.3
+ * Version: 4.2.0
  * ============================================================
  */
 
@@ -594,6 +594,51 @@ function resoudreErreur_(module, action, message) {
     Logger.log("Impossible de résoudre l'erreur suivie : " + e);
     return 0;
   }
+}
+
+
+/**
+ * Correctif V4.2.0 (12/09/2026) : résolution MANUELLE d'une ligne de
+ * l'onglet ERREURS -- certaines entrées ne peuvent structurellement
+ * jamais se refermer via resoudreErreur_() (ex : clé liée à un numéro
+ * de ligne qui a bougé depuis un ajout/suppression ailleurs dans
+ * Films, voir échange du 10/09/2026) et restaient bloquées ACTIVE
+ * pour toujours, sans aucun moyen de les fermer à la main.
+ *
+ * Utilisation : dans le Sheet, clique n'importe quelle cellule de la
+ * ligne à résoudre dans l'onglet ERREURS, PUIS lance cette fonction
+ * depuis l'éditeur (menu déroulant "Exécuter" -- elle ne prend aucun
+ * paramètre, donc sélectionnable directement).
+ */
+function resoudreErreurLigneSelectionneeV1() {
+  const sheet = SpreadsheetApp.getActiveSheet();
+  if (sheet.getName() !== SHEETS.ERREURS) {
+    SpreadsheetApp.getUi().alert(
+      "Sélectionne d'abord une ligne dans l'onglet \"" + SHEETS.ERREURS + "\" avant de lancer cette fonction."
+    );
+    return;
+  }
+
+  const ligne = SpreadsheetApp.getActiveRange().getRow();
+  if (ligne <= 1) {
+    SpreadsheetApp.getUi().alert("Sélectionne une ligne de donnée, pas l'en-tête.");
+    return;
+  }
+
+  const suivi = initialiserSuiviErreursV41_(sheet);
+  const statutActuel = String(sheet.getRange(ligne, suivi.h.Statut + 1).getValue() || "").toUpperCase();
+  if (statutActuel !== "ACTIVE") {
+    SpreadsheetApp.getUi().alert(
+      "Ligne " + ligne + " : statut actuel \"" + (statutActuel || "vide") + "\" (pas ACTIVE) -- rien à faire."
+    );
+    return;
+  }
+
+  sheet.getRange(ligne, suivi.h.Statut + 1).setValue("RESOLUE");
+  sheet.getRange(ligne, suivi.h.DateResolution + 1).setValue(new Date());
+
+  Logger.log("Ligne " + ligne + " marquée RESOLUE manuellement.");
+  SpreadsheetApp.getUi().alert("Ligne " + ligne + " marquée comme résolue.");
 }
 
 
