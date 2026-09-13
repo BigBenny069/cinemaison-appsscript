@@ -7,7 +7,13 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.7
+ * Version: 2.8
+ *
+ * Correctif V2.8 (12/09/2026) : nouvelle action
+ * "alerteAnomalieScraping" -- point 4 du plan de fiabilisation. Un
+ * collecteur (prime.js/netflix.js/disney.js) qui trouve beaucoup moins
+ * de fiches que son dernier run réussi envoie maintenant un mail
+ * d'alerte au lieu d'échouer silencieusement.
  *
  * Correctif V2.7 (11/09/2026) : construireHtmlSuggestionsPrimeV1_
  * affichait toujours "PRIME" et "Prime Video" en dur dans l'en-tête et
@@ -228,6 +234,12 @@ const WEBHOOK_REENRICH_HANDLER_V1 = "traiterFileReenrichissementWebhookV1";
  *        "plateforme": "NETFLIX"|"DISNEY", "fiches": [{titre, url}, ...] }
  *      -> mail de vérification manuelle pour les fiches qu'un collecteur
  *      n'a pas su classer (aucun équivalent Prime). V2.4 (10/09/2026).
+ *   10. { "secret": "...", "action": "alerteAnomalieScraping",
+ *        "plateforme": "PRIME"|"NETFLIX"|"DISNEY", "nombreActuel": 12,
+ *        "nombreAttendu": 258, "dateDernierRun": "..." }
+ *      -> mail d'alerte quand un collecteur trouve beaucoup moins de
+ *      fiches que son dernier run réussi (appelé par prime.js/
+ *      netflix.js/disney.js, en direct). V2.8 (12/09/2026).
  */
 function doPost(e) {
   try {
@@ -269,6 +281,10 @@ function doPost(e) {
 
     if (corps.action === "alerteStatutInconnuStreaming") {
       return traiterAlerteStatutInconnuStreamingV1_(corps);
+    }
+
+    if (corps.action === "alerteAnomalieScraping") {
+      return traiterAlerteAnomalieScrapingV1_(corps);
     }
 
     const id = safeTrim_(corps.id || "");
@@ -617,6 +633,55 @@ function traiterAlerteStatutInconnuStreamingV1_(corps) {
   );
 
   return reponseJsonWebhook_({ ok: true, mailEnvoye: !!destinataires, nombreFiches: fiches.length });
+}
+
+/**
+ * Reçoit { secret, action: "alerteAnomalieScraping", plateforme,
+ * nombreActuel, nombreAttendu, dateDernierRun } -- le collecteur a
+ * trouvé beaucoup moins de fiches que lors de son dernier run réussi
+ * (moins de 70%, voir verifierAnomalieDefilement_ dans
+ * prime.js/netflix.js/disney.js) -- signe probable que la plateforme a
+ * changé sa mise en page et que le sélecteur ne trouve plus grand-
+ * chose, plutôt qu'une vraie diminution de "Ma Liste". Point 4 du plan
+ * de fiabilisation, 12/09/2026. Rien n'est écrit dans le Sheet ici.
+ */
+function traiterAlerteAnomalieScrapingV1_(corps) {
+  const plateforme = String(corps.plateforme || "").trim();
+  const nombreActuel = Number(corps.nombreActuel);
+  const nombreAttendu = Number(corps.nombreAttendu);
+
+  const destinataires = destinatairesPourService_("AjoutAutoPrime");
+  if (destinataires) {
+    const corpsHtml =
+      '<!DOCTYPE html><html><head><meta charset="UTF-8"></head>' +
+      '<body style="margin:0;padding:0;background:#F5EFE0"><div style="background:#F5EFE0;padding:24px 12px">' +
+      '<div style="background:#FFFBF2;border-radius:8px;padding:28px 22px;max-width:480px;margin:0 auto;font-family:Georgia,serif">' +
+      '<div style="font-size:22px;font-weight:bold;color:#3A2E22">CINÉ<span style="color:#B5622B">MAISON</span></div>' +
+      '<div style="font-size:11px;letter-spacing:1.5px;color:#B5622B;margin-top:4px;font-family:Arial,sans-serif">' +
+      plateforme + ' &middot; ANOMALIE DE SCRAPING</div>' +
+      '<div style="border-top:1px solid #E3D9C4;margin:16px 0"></div>' +
+      '<p style="font-size:13px;color:#3A2E22;font-family:Arial,sans-serif">' +
+      'Seulement <strong>' + nombreActuel + ' fiche(s)</strong> trouvée(s) cette fois, contre ' +
+      '<strong>' + nombreAttendu + '</strong> lors du dernier run réussi (' + (corps.dateDernierRun || "date inconnue") + ').</p>' +
+      '<p style="font-size:13px;color:#9A9182;font-family:Arial,sans-serif;margin-top:8px">' +
+      'Signe probable que ' + plateforme + ' a changé sa mise en page et que le sélecteur ne trouve plus tout -- ' +
+      'à vérifier avant de faire confiance au dernier contrôle.</p>' +
+      '</div></div></body></html>';
+    MailApp.sendEmail({
+      to: destinataires,
+      subject: "CinéMaison - V2 - ⚠ " + plateforme + " : seulement " + nombreActuel + "/" + nombreAttendu + " fiche(s) trouvée(s)",
+      htmlBody: corpsHtml,
+    });
+  }
+
+  journal_(
+    "CONTROLE_" + plateforme,
+    "ANOMALIE_SCRAPING",
+    destinataires ? "OK" : "IGNORE_SANS_DESTINATAIRE",
+    "Actuel=" + nombreActuel + " | Attendu=" + nombreAttendu
+  );
+
+  return reponseJsonWebhook_({ ok: true, mailEnvoye: !!destinataires });
 }
 
 /**
