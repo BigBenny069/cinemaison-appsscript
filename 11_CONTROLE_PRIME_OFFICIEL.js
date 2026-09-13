@@ -3,8 +3,16 @@
  * CinéMaison V4
  * Script  : 11_CONTROLE_PRIME_OFFICIEL.gs
  * Rôle    : Diagnostic et import sécurisé des résultats Prime Video officiels
- * Version : 1.3 (13/09/2026)
+ * Version : 1.4 (13/09/2026)
  * ============================================================
+ *
+ * Correctif V1.4 (13/09/2026) : detailFiche_ plantait sur les 3
+ * plateformes ("ReferenceError: idFilm is not defined") -- idFilm est
+ * déclaré à l'intérieur de la boucle (portée locale à chaque tour),
+ * mais detailFiche_ est définie avant la boucle et n'y avait donc pas
+ * accès. L'id est maintenant passé en paramètre explicite. Aucune
+ * donnée perdue entre-temps (l'écriture réelle n'était pas affectée,
+ * seule l'étape de vérification/mail plantait après coup).
  *
  * Correctif V1.3 (13/09/2026) : traiterResultatsPrimeOfficielV110_
  * collecte maintenant aussi le détail par catégorie (id/titre/durée/
@@ -251,10 +259,10 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
   // à la logique de validation ci-dessus, sert uniquement à alimenter
   // la page "Voir le détail" du mail (voir 09_WEBHOOK.gs).
   const details = { sansAlerte: [], conflitsProteges: [], datesValidees: [], ignores: [], erreurs: [] };
-  function detailFiche_(f) {
-    if (!f) return { id: idFilm };
+  function detailFiche_(f, id) {
+    if (!f) return { id: id };
     return {
-      id: idFilm,
+      id: id,
       titre: f.valeurs[hFilms.Titre] || "",
       duree: hFilms.Duree !== undefined ? (f.valeurs[hFilms.Duree] || "") : "",
       type: hFilms.Type !== undefined ? (f.valeurs[hFilms.Type] || "") : "",
@@ -287,7 +295,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
     if (!estPrimeVideoV110_(film.valeurs[hFilms.Plateforme])) {
       Logger.log("IGNORÉ | " + idFilm + " | plateforme différente de PRIME VIDEO");
       ignores++;
-      details.ignores.push(Object.assign(detailFiche_(film), { raison: "plateforme différente de PRIME VIDEO" }));
+      details.ignores.push(Object.assign(detailFiche_(film, idFilm), { raison: "plateforme différente de PRIME VIDEO" }));
       continue;
     }
 
@@ -300,7 +308,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
     if (statut !== "AUCUNE_ALERTE" && statut !== "DATE_DETECTEE") {
       Logger.log("IGNORÉ SANS EFFACEMENT | " + idFilm + " | statut=" + statut);
       ignores++;
-      details.ignores.push(Object.assign(detailFiche_(film), { raison: "statut=" + statut }));
+      details.ignores.push(Object.assign(detailFiche_(film, idFilm), { raison: "statut=" + statut }));
       continue;
     }
 
@@ -311,7 +319,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
     if (!controleLe) {
       Logger.log("ERREUR HORODATAGE | " + idFilm + " | ControleLe invalide");
       erreurs++;
-      details.erreurs.push(Object.assign(detailFiche_(film), { raison: "ControleLe invalide" }));
+      details.erreurs.push(Object.assign(detailFiche_(film, idFilm), { raison: "ControleLe invalide" }));
       continue;
     }
 
@@ -326,7 +334,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
         " jours | contrôle=" + formaterDatePrimeV110_(jourControle)
       );
       erreurs++;
-      details.erreurs.push(Object.assign(detailFiche_(film), { raison: "résultat trop ancien (" + ageResultat + " jours)" }));
+      details.erreurs.push(Object.assign(detailFiche_(film, idFilm), { raison: "résultat trop ancien (" + ageResultat + " jours)" }));
       continue;
     }
     controlesValides++;
@@ -374,7 +382,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
 
     if (statut === "AUCUNE_ALERTE") {
       sansAlerte++;
-      details.sansAlerte.push(detailFiche_(film));
+      details.sansAlerte.push(detailFiche_(film, idFilm));
       Logger.log(
         "SANS ALERTE | " + idFilm + " | ligne " + film.ligne +
         " | date existante conservée" +
@@ -403,7 +411,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
         Number(correspondanceMessage[1]) !== jours) {
       Logger.log("ERREUR VALIDATION | " + idFilm + " | message=" + message);
       erreurs++;
-      details.erreurs.push(Object.assign(detailFiche_(film), { raison: "message invalide" }));
+      details.erreurs.push(Object.assign(detailFiche_(film, idFilm), { raison: "message invalide" }));
       continue;
     }
 
@@ -414,7 +422,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
     if (!dateRetrait) {
       Logger.log("ERREUR DATE | " + idFilm);
       erreurs++;
-      details.erreurs.push(Object.assign(detailFiche_(film), { raison: "date invalide" }));
+      details.erreurs.push(Object.assign(detailFiche_(film, idFilm), { raison: "date invalide" }));
       continue;
     }
 
@@ -429,7 +437,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
         " | contrôle=" + formaterDatePrimeV110_(jourControle)
       );
       erreurs++;
-      details.erreurs.push(Object.assign(detailFiche_(film), { raison: "incohérence jours/date" }));
+      details.erreurs.push(Object.assign(detailFiche_(film, idFilm), { raison: "incohérence jours/date" }));
       continue;
     }
 
@@ -444,7 +452,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
 
     if (autreSourceProtegee) {
       conflitsProteges++;
-      details.conflitsProteges.push(Object.assign(detailFiche_(film), { raisonConflit: "source conservée : " + ancienneSource }));
+      details.conflitsProteges.push(Object.assign(detailFiche_(film, idFilm), { raisonConflit: "source conservée : " + ancienneSource }));
       Logger.log(
         "CONFLIT PROTÉGÉ | " + idFilm + " | ligne " + film.ligne +
         " | source conservée=" + ancienneSource +
@@ -466,7 +474,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
     datesValidees++;
     const dateChangee = !memeDatePrimeV110_(ancienneDate, dateRetrait);
     if (dateChangee) changements++;
-    details.datesValidees.push(Object.assign(detailFiche_(film), {
+    details.datesValidees.push(Object.assign(detailFiche_(film, idFilm), {
       dateRetrait: formaterDatePrimeV110_(dateRetrait),
       changee: dateChangee,
     }));
