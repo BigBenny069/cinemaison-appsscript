@@ -5,7 +5,11 @@
  * Rôle    : Diagnostic et import sécurisé des résultats officiels
  *           Netflix / Disney+ (équivalent générique de
  *           11_CONTROLE_PRIME_OFFICIEL.gs, laissé intact pour Prime).
- * Version : 1.1
+ * Version : 1.2
+ *
+ * Correctif V1.2 (13/09/2026) : même correctif que
+ * 11_CONTROLE_PRIME_OFFICIEL.gs V1.4 -- detailFiche_ plantait
+ * ("idFilm is not defined"), id maintenant passé en paramètre explicite.
  *
  * Correctif V1.1 (13/09/2026) : traiterResultatsStreamingOfficielV1_
  * collecte maintenant aussi le détail par catégorie (id/titre/durée/
@@ -163,10 +167,10 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
   // Correctif V1.3 (13/09/2026) : voir note identique dans
   // 11_CONTROLE_PRIME_OFFICIEL.gs -- purement additif.
   const details = { sansAlerte: [], conflitsProteges: [], datesValidees: [], ignores: [], erreurs: [] };
-  function detailFiche_(f) {
-    if (!f) return { id: idFilm };
+  function detailFiche_(f, id) {
+    if (!f) return { id: id };
     return {
-      id: idFilm,
+      id: id,
       titre: f.valeurs[hFilms.Titre] || "",
       duree: hFilms.Duree !== undefined ? (f.valeurs[hFilms.Duree] || "") : "",
       type: hFilms.Type !== undefined ? (f.valeurs[hFilms.Type] || "") : "",
@@ -195,7 +199,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
     if (!estPlateformeStreamingV1_(config, film.valeurs[hFilms.Plateforme])) {
       Logger.log("IGNORÉ | " + idFilm + " | plateforme différente de " + config.libellePlateforme);
       ignores++;
-      details.ignores.push(Object.assign(detailFiche_(film), { raison: "plateforme différente de " + config.libellePlateforme }));
+      details.ignores.push(Object.assign(detailFiche_(film, idFilm), { raison: "plateforme différente de " + config.libellePlateforme }));
       continue;
     }
 
@@ -204,7 +208,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
     if (statut !== "AUCUNE_ALERTE" && statut !== "DATE_DETECTEE") {
       Logger.log("IGNORÉ SANS EFFACEMENT | " + idFilm + " | statut=" + statut);
       ignores++;
-      details.ignores.push(Object.assign(detailFiche_(film), { raison: "statut=" + statut }));
+      details.ignores.push(Object.assign(detailFiche_(film, idFilm), { raison: "statut=" + statut }));
       continue;
     }
 
@@ -212,7 +216,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
     if (!controleLe) {
       Logger.log("ERREUR HORODATAGE | " + idFilm + " | ControleLe invalide");
       erreurs++;
-      details.erreurs.push(Object.assign(detailFiche_(film), { raison: "ControleLe invalide" }));
+      details.erreurs.push(Object.assign(detailFiche_(film, idFilm), { raison: "ControleLe invalide" }));
       continue;
     }
 
@@ -224,7 +228,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
         " jours | contrôle=" + formaterDateStreamingV1_(jourControle)
       );
       erreurs++;
-      details.erreurs.push(Object.assign(detailFiche_(film), { raison: "résultat trop ancien (" + ageResultat + " jours)" }));
+      details.erreurs.push(Object.assign(detailFiche_(film, idFilm), { raison: "résultat trop ancien (" + ageResultat + " jours)" }));
       continue;
     }
     controlesValides++;
@@ -236,7 +240,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
 
     if (statut === "AUCUNE_ALERTE") {
       sansAlerte++;
-      details.sansAlerte.push(detailFiche_(film));
+      details.sansAlerte.push(detailFiche_(film, idFilm));
       Logger.log(
         "SANS ALERTE | " + idFilm + " | ligne " + film.ligne + " | date existante conservée" +
         (plateformeAjoutee ? " | " + config.libellePlateforme + " sera ajoutée aux plateformes" : "")
@@ -257,7 +261,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
     if (!isFinite(jours) || jours < 0 || jours > 60) {
       Logger.log("ERREUR VALIDATION | " + idFilm + " | joursRestants=" + resultat[hResultats.JoursRestants]);
       erreurs++;
-      details.erreurs.push(Object.assign(detailFiche_(film), { raison: "joursRestants invalide" }));
+      details.erreurs.push(Object.assign(detailFiche_(film, idFilm), { raison: "joursRestants invalide" }));
       continue;
     }
 
@@ -265,7 +269,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
     if (!dateRetrait) {
       Logger.log("ERREUR DATE | " + idFilm);
       erreurs++;
-      details.erreurs.push(Object.assign(detailFiche_(film), { raison: "date invalide" }));
+      details.erreurs.push(Object.assign(detailFiche_(film, idFilm), { raison: "date invalide" }));
       continue;
     }
 
@@ -276,7 +280,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
         " | différence=" + difference + " | contrôle=" + formaterDateStreamingV1_(jourControle)
       );
       erreurs++;
-      details.erreurs.push(Object.assign(detailFiche_(film), { raison: "incohérence jours/date" }));
+      details.erreurs.push(Object.assign(detailFiche_(film, idFilm), { raison: "incohérence jours/date" }));
       continue;
     }
 
@@ -287,7 +291,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
 
     if (autreSourceProtegee) {
       conflitsProteges++;
-      details.conflitsProteges.push(Object.assign(detailFiche_(film), { raisonConflit: "source conservée : " + ancienneSource }));
+      details.conflitsProteges.push(Object.assign(detailFiche_(film, idFilm), { raisonConflit: "source conservée : " + ancienneSource }));
       Logger.log(
         "CONFLIT PROTÉGÉ | " + idFilm + " | ligne " + film.ligne +
         " | source conservée=" + ancienneSource +
@@ -305,7 +309,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
     datesValidees++;
     const dateChangee = !memeDateStreamingV1_(ancienneDate, dateRetrait);
     if (dateChangee) changements++;
-    details.datesValidees.push(Object.assign(detailFiche_(film), {
+    details.datesValidees.push(Object.assign(detailFiche_(film, idFilm), {
       dateRetrait: formaterDateStreamingV1_(dateRetrait),
       changee: dateChangee,
     }));
