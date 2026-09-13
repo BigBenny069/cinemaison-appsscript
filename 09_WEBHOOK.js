@@ -7,7 +7,15 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.8
+ * Version: 2.9
+ *
+ * Correctif V2.9 (13/09/2026) : nouvelle page "Voir le détail" sur le
+ * mail de contrôle (Prime/Netflix/Disney+) -- ajout d'un doGet(e)
+ * (n'existait pas jusqu'ici, seul doPost était utilisé), qui affiche
+ * le détail par catégorie (affiche/titre/durée/type) de la dernière
+ * simulation, avec un menu déroulant par catégorie (vraie page web,
+ * pas de limite JS comme dans un mail). Le détail est sauvegardé dans
+ * le nouvel onglet DERNIER_DETAIL_CONTROLE à chaque simulation.
  *
  * Correctif V2.8 (12/09/2026) : nouvelle action
  * "alerteAnomalieScraping" -- point 4 du plan de fiabilisation. Un
@@ -300,6 +308,165 @@ function doPost(e) {
 }
 
 /**
+ * Point d'entrée HTTP GET -- ajouté le 13/09/2026 (doPost existait déjà,
+ * jamais de doGet jusqu'ici). Une seule page pour l'instant :
+ * ?page=details&plateforme=PRIME|NETFLIX|DISNEY&pw=... -- affiche le
+ * détail par catégorie (affiche/titre/durée/type) de la dernière
+ * simulation de contrôle, avec un menu déroulant par catégorie. Lien
+ * "VOIR LE DÉTAIL" dans le mail de contrôle (construireHtmlResumeControle...).
+ */
+function doGet(e) {
+  const params = (e && e.parameter) || {};
+  if (params.page !== "details") {
+    return HtmlService.createHtmlOutput("<p>Page inconnue.</p>");
+  }
+
+  const motDePasse = String(lireConfig_("AddFilmPassword", ""));
+  if (!motDePasse || String(params.pw || "") !== motDePasse) {
+    return HtmlService.createHtmlOutput("<p>Mot de passe manquant ou invalide.</p>");
+  }
+
+  const plateforme = String(params.plateforme || "").trim().toUpperCase();
+  if (["PRIME", "NETFLIX", "DISNEY"].indexOf(plateforme) === -1) {
+    return HtmlService.createHtmlOutput("<p>Plateforme inconnue.</p>");
+  }
+
+  return HtmlService.createHtmlOutput(construirePageDetailControleV1_(plateforme))
+    .setTitle("CinéMaison - Détail contrôle " + plateforme)
+    .addMetaTag("viewport", "width=device-width, initial-scale=1");
+}
+
+/**
+ * Sauvegarde (remplace) le détail par catégorie d'UNE plateforme dans
+ * l'onglet DERNIER_DETAIL_CONTROLE -- toujours la dernière simulation
+ * en date, jamais un historique. Même principe que
+ * sauvegarderDernieresSuggestionsV1_ (18_RAPPORT_ECARTS_PLATEFORMES.gs) :
+ * une ligne par fiche, données complètes en JSON plutôt qu'une colonne
+ * par champ (plus simple à faire évoluer).
+ */
+function sauvegarderDernierDetailControleV1_(plateforme, details) {
+  const NOM_FEUILLE = "DERNIER_DETAIL_CONTROLE";
+  const classeur = SpreadsheetApp.getActiveSpreadsheet();
+  let feuille = classeur.getSheetByName(NOM_FEUILLE);
+  const entete = ["Plateforme", "Categorie", "DonneesJSON", "DateEnregistrement"];
+
+  if (!feuille) {
+    feuille = classeur.insertSheet(NOM_FEUILLE);
+    feuille.getRange(1, 1, 1, entete.length).setValues([entete]).setFontWeight("bold");
+  }
+
+  const maintenant = new Date();
+  const lignesConservees = [];
+  if (feuille.getLastRow() >= 2) {
+    const donnees = feuille.getRange(2, 1, feuille.getLastRow() - 1, entete.length).getValues();
+    donnees.forEach(function (ligne) {
+      if (String(ligne[0] || "").trim() !== plateforme) lignesConservees.push(ligne);
+    });
+  }
+
+  const nouvellesLignes = [];
+  ["sansAlerte", "conflitsProteges", "datesValidees", "ignores", "erreurs"].forEach(function (categorie) {
+    (details[categorie] || []).forEach(function (f) {
+      nouvellesLignes.push([plateforme, categorie, JSON.stringify(f), maintenant]);
+    });
+  });
+
+  const toutesLesLignes = lignesConservees.concat(nouvellesLignes);
+  feuille.getRange(2, 1, Math.max(feuille.getMaxRows() - 1, 1), entete.length).clearContent();
+  if (toutesLesLignes.length > 0) {
+    feuille.getRange(2, 1, toutesLesLignes.length, entete.length).setValues(toutesLesLignes);
+  }
+}
+
+/** Construit l'URL de la page de détail pour une plateforme donnée. */
+function construireLienDetailControleV1_(plateforme) {
+  const motDePasse = String(lireConfig_("AddFilmPassword", ""));
+  return ScriptApp.getService().getUrl() +
+    "?page=details&plateforme=" + encodeURIComponent(plateforme) +
+    "&pw=" + encodeURIComponent(motDePasse);
+}
+
+const LIBELLES_CATEGORIES_DETAIL_V1 = {
+  datesValidees: "Dates validées",
+  sansAlerte: "Sans alerte",
+  conflitsProteges: "Conflits d'autre source protégés",
+  ignores: "Ignorés",
+  erreurs: "Erreurs",
+};
+
+/**
+ * Relit DERNIER_DETAIL_CONTROLE pour une plateforme et construit une
+ * page HTML autonome (vraie page web, pas un mail -- le JavaScript
+ * fonctionne normalement ici) avec un menu déroulant par catégorie.
+ */
+function construirePageDetailControleV1_(plateforme) {
+  const classeur = SpreadsheetApp.getActiveSpreadsheet();
+  const feuille = classeur.getSheetByName("DERNIER_DETAIL_CONTROLE");
+  const parCategorie = { datesValidees: [], sansAlerte: [], conflitsProteges: [], ignores: [], erreurs: [] };
+
+  if (feuille && feuille.getLastRow() >= 2) {
+    const donnees = feuille.getRange(2, 1, feuille.getLastRow() - 1, 4).getValues();
+    donnees.forEach(function (ligne) {
+      if (String(ligne[0] || "").trim() !== plateforme) return;
+      const categorie = String(ligne[1] || "").trim();
+      if (!parCategorie[categorie]) return;
+      try {
+        parCategorie[categorie].push(JSON.parse(ligne[2]));
+      } catch (e) {
+        // ligne corrompue -- ignorée, pas bloquant
+      }
+    });
+  }
+
+  const sections = Object.keys(LIBELLES_CATEGORIES_DETAIL_V1).map(function (categorie) {
+    const fiches = parCategorie[categorie];
+    if (fiches.length === 0) return "";
+
+    const lignesFiches = fiches.map(function (f) {
+      const vignette = f.affiche
+        ? '<img src="' + f.affiche + '" width="46" height="69" style="border-radius:4px;object-fit:cover;flex-shrink:0;margin-right:12px">'
+        : '<div style="width:46px;height:69px;border-radius:4px;background:#E3D9C4;flex-shrink:0;margin-right:12px"></div>';
+      const sousLignes = [];
+      if (f.type) sousLignes.push(f.type);
+      if (f.duree) sousLignes.push(f.duree);
+      if (f.plateforme) sousLignes.push(f.plateforme);
+      if (f.dateRetrait) sousLignes.push("part le " + f.dateRetrait + (f.changee ? " (changement)" : ""));
+      if (f.raison) sousLignes.push(f.raison);
+      if (f.raisonConflit) sousLignes.push(f.raisonConflit);
+      return '<div style="display:flex;align-items:flex-start;padding:8px 0;border-bottom:1px solid #EFE7D6">' +
+        vignette +
+        '<div style="font-family:Arial,sans-serif">' +
+        '<div style="font-size:13px;color:#3A2E22;font-weight:bold">' + (f.titre || f.id) + '</div>' +
+        '<div style="font-size:11.5px;color:#9A9182;margin-top:2px">' + sousLignes.join(" &middot; ") + '</div>' +
+        '</div></div>';
+    }).join("");
+
+    return (
+      '<details style="margin-top:10px">' +
+      '<summary style="font-family:Arial,sans-serif;font-size:13px;font-weight:bold;color:#3A2E22;cursor:pointer;padding:8px 0">' +
+      LIBELLES_CATEGORIES_DETAIL_V1[categorie] + ' (' + fiches.length + ')' +
+      '</summary>' +
+      lignesFiches +
+      '</details>'
+    );
+  }).join("");
+
+  return (
+    '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>' +
+    '<body style="margin:0;padding:0;background:#F5EFE0">' +
+    '<div style="background:#F5EFE0;padding:24px 12px;min-height:100vh">' +
+    '<div style="background:#FFFBF2;border-radius:8px;padding:28px 22px;' +
+    'max-width:600px;margin:0 auto;font-family:Georgia,serif">' +
+    '<div style="font-size:22px;font-weight:bold;color:#3A2E22">CINÉ<span style="color:#B5622B">MAISON</span></div>' +
+    '<div style="font-size:11px;letter-spacing:1.5px;color:#B5622B;margin-top:4px;font-family:Arial,sans-serif">' +
+    'DÉTAIL DU CONTRÔLE &middot; ' + plateforme + '</div>' +
+    '<div style="border-top:1px solid #E3D9C4;margin:16px 0"></div>' +
+    (sections || '<p style="font-family:Arial,sans-serif;font-size:13px;color:#9A9182">Aucune donnée -- lance un contrôle d\'abord.</p>') +
+    '</div></div></body></html>'
+  );
+}
+
+/**
  * Écrit les réglages du résumé quotidien dans CONFIG via ecrireConfig_ —
  * jamais d'écriture directe de cellule depuis Vercel, pour ne dépendre
  * que de la logique déjà fiable côté Apps Script.
@@ -432,13 +599,14 @@ function traiterAlerteSuggestionsPrimeV1_(corps) {
  */
 function traiterLancerVerificationControlePrimeV1_(corps) {
   const resume = verifierResultatsPrimeOfficielSansEcriture();
+  sauvegarderDernierDetailControleV1_("PRIME", resume.details);
 
   const destinataires = destinatairesPourService_("AjoutAutoPrime");
   if (destinataires) {
     // confirmUrl est construit par prime.js (qui a déjà le mot de passe
     // via secrets-local.json) et transmis tel quel -- pas de clé de
     // config à deviner côté Apps Script.
-    const corpsHtml = construireHtmlResumeControlePrimeV1_(resume, corps.confirmUrl);
+    const corpsHtml = construireHtmlResumeControlePrimeV1_(resume, corps.confirmUrl, "PRIME");
     MailApp.sendEmail({
       to: destinataires,
       subject: "CinéMaison - V2 - Prime : " + resume.controlesValides + " contrôle(s) prêt(s) à appliquer",
@@ -543,6 +711,7 @@ function traiterAlerteSuggestionsStreamingV1_(corps) {
 function traiterLancerVerificationControleStreamingV1_(corps) {
   const plateforme = String(corps.plateforme || "").trim();
   const resume = verifierResultatsStreamingOfficielSansEcriture(plateforme);
+  sauvegarderDernierDetailControleV1_(plateforme, resume.details);
 
   const destinataires = destinatairesPourService_("AjoutAutoPrime");
   if (destinataires) {
@@ -716,6 +885,12 @@ function construireHtmlResumeControleStreamingV1_(plateforme, resume, confirmUrl
       'Lien de validation manquant -- lance appliquerResultatsStreamingOfficiel("' + plateforme + '") ' +
       'à la main dans l\'éditeur Apps Script.</div>';
 
+  const lienDetail = construireLienDetailControleV1_(plateforme);
+  const boutonDetail = '<a href="' + lienDetail +
+    '" style="display:inline-block;margin-top:16px;margin-left:8px;background:#FFFBF2;' +
+    'color:#B5622B;text-decoration:none;font-family:Arial,sans-serif;font-size:13px;' +
+    'font-weight:bold;padding:10px 16px;border-radius:5px;border:1px solid #B5622B">VOIR LE DÉTAIL</a>';
+
   return (
     '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
     '<meta name="color-scheme" content="light only">' +
@@ -730,7 +905,7 @@ function construireHtmlResumeControleStreamingV1_(plateforme, resume, confirmUrl
     'margin-top:4px;font-family:Arial,sans-serif">CONTRÔLE ' + plateforme + ' &middot; SIMULATION</div>' +
     '<div style="border-top:1px solid #E3D9C4;margin:16px 0"></div>' +
     '<table role="presentation" width="100%" style="border-collapse:collapse">' + lignes + '</table>' +
-    bouton +
+    bouton + boutonDetail +
     '</div></div></body></html>'
   );
 }
@@ -740,7 +915,7 @@ function construireHtmlResumeControleStreamingV1_(plateforme, resume, confirmUrl
 /**
  * Même habillage (fond crème, logo CINÉMAISON) que les autres emails.
  */
-function construireHtmlResumeControlePrimeV1_(resume, confirmUrl) {
+function construireHtmlResumeControlePrimeV1_(resume, confirmUrl, plateforme) {
   const lignes = [
     ["Contrôles valides", resume.controlesValides],
     ["Dates validées", resume.datesValidees],
@@ -771,6 +946,12 @@ function construireHtmlResumeControlePrimeV1_(resume, confirmUrl) {
       'Lien de validation manquant -- lance appliquerResultatsPrimeOfficiel() ' +
       'à la main dans l\'éditeur Apps Script.</div>';
 
+  const lienDetail = construireLienDetailControleV1_(plateforme || "PRIME");
+  const boutonDetail = '<a href="' + lienDetail +
+    '" style="display:inline-block;margin-top:16px;margin-left:8px;background:#FFFBF2;' +
+    'color:#B5622B;text-decoration:none;font-family:Arial,sans-serif;font-size:13px;' +
+    'font-weight:bold;padding:10px 16px;border-radius:5px;border:1px solid #B5622B">VOIR LE DÉTAIL</a>';
+
   return (
     '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
     '<meta name="color-scheme" content="light only">' +
@@ -785,7 +966,7 @@ function construireHtmlResumeControlePrimeV1_(resume, confirmUrl) {
     'margin-top:4px;font-family:Arial,sans-serif">CONTRÔLE PRIME &middot; SIMULATION</div>' +
     '<div style="border-top:1px solid #E3D9C4;margin:16px 0"></div>' +
     '<table role="presentation" width="100%" style="border-collapse:collapse">' + lignes + '</table>' +
-    bouton +
+    bouton + boutonDetail +
     '</div></div></body></html>'
   );
 }
