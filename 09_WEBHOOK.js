@@ -7,7 +7,19 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.9
+ * Version: 2.10
+ *
+ * Correctif V2.10 (15/09/2026) : "REDEMANDER UNE VÉRIFICATION" (bouton
+ * app) échouait très régulièrement avec "Un autre enrichissement est
+ * déjà en cours" -- une seule tentative (90s max d'attente sur le
+ * verrou), alors que les cycles automatiques (enrichirLetterboxdEnAttenteV4
+ * notamment) tournent parfois plus longtemps que ça, surtout avec les
+ * ralentissements Letterboxd. traiterFileReenrichissementWebhookV1 fait
+ * maintenant jusqu'à 3 tentatives avec pause entre chacune, avant
+ * d'abandonner pour de bon. Attention : sur "Redemander en masse" (si
+ * plusieurs fiches en file), le pire des cas peut désormais approcher
+ * la limite d'exécution de 6 min d'Apps Script -- à surveiller si ce
+ * bouton est utilisé sur beaucoup de fiches à la fois.
  *
  * Correctif V2.9 (13/09/2026) : nouvelle page "Voir le détail" sur le
  * mail de contrôle (Prime/Netflix/Disney+) -- ajout d'un doGet(e)
@@ -1193,9 +1205,33 @@ function traiterFileReenrichissementWebhookV1() {
   }
 
   liste.forEach(function (id) {
-    try {
-      reenrichirParIdSheetV1_(id);
-      journal_("ENRICHISSEMENT", "WEBHOOK_APP", "OK", "Fiche relancée immédiatement depuis l'app : " + id);
+    // Correctif V2.2 (15/09/2026) : "REDEMANDER UNE VÉRIFICATION" ne
+    // faisait qu'UNE tentative (90s d'attente max sur le verrou) avant
+    // d'abandonner -- avec les cycles automatiques qui tournent souvent
+    // plus longtemps que ça, ça échouait très régulièrement, même après
+    // avoir attendu la limite. Jusqu'à 3 tentatives maintenant, avec une
+    // pause entre chacune -- toujours le même verrou (aucune donnée
+    // n'est mise en danger), juste plus de persévérance avant
+    // d'abandonner pour de bon.
+    const TENTATIVES_MAX = 3;
+    const PAUSE_ENTRE_TENTATIVES_MS = 15000;
+    let derniereErreur = null;
+    let reussi = false;
+
+    for (let tentative = 1; tentative <= TENTATIVES_MAX && !reussi; tentative++) {
+      try {
+        reenrichirParIdSheetV1_(id);
+        journal_("ENRICHISSEMENT", "WEBHOOK_APP", "OK", "Fiche relancée immédiatement depuis l'app : " + id + " (tentative " + tentative + "/" + TENTATIVES_MAX + ")");
+        reussi = true;
+      } catch (e) {
+        derniereErreur = e;
+        if (tentative < TENTATIVES_MAX) {
+          Utilities.sleep(PAUSE_ENTRE_TENTATIVES_MS);
+        }
+      }
+    }
+
+    if (reussi) {
       // Correctif V2.1 (07/09/2026) : rien n'appelait jamais
       // resoudreErreur_ pour ce module -- une erreur "WEBHOOK_APP"
       // restait ACTIVE pour toujours même une fois la fiche relancée
@@ -1204,8 +1240,8 @@ function traiterFileReenrichissementWebhookV1() {
       // module+action) pour ne refermer QUE l'entrée de cette fiche,
       // pas celle d'une autre fiche qui aurait échoué au même moment.
       resoudreErreur_("ENRICHISSEMENT", "WEBHOOK_APP", "Échec relance immédiate depuis l'app : " + id);
-    } catch (e) {
-      erreur_("ENRICHISSEMENT", "WEBHOOK_APP", "Échec relance immédiate depuis l'app : " + id, String(e));
+    } else {
+      erreur_("ENRICHISSEMENT", "WEBHOOK_APP", "Échec relance immédiate depuis l'app : " + id, "Après " + TENTATIVES_MAX + " tentatives : " + String(derniereErreur));
     }
   });
 }
