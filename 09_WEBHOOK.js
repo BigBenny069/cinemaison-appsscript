@@ -7,7 +7,15 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.10
+ * Version: 2.11
+ *
+ * Correctif V2.11 (16/09/2026) : nouvelle action
+ * "rapportVerificationLetterboxd" -- reçoit la liste des fiches
+ * suspectes trouvées par scripts/verifier-urls-letterboxd.js (GitHub
+ * Actions, déclenchement manuel, voir ce script pour le contexte
+ * complet) et envoie un mail récapitulatif via le service
+ * "AlerteTechnique". Ne corrige rien automatiquement -- voir
+ * traiterRapportVerificationLetterboxdV1_.
  *
  * Correctif V2.10 (15/09/2026) : "REDEMANDER UNE VÉRIFICATION" (bouton
  * app) échouait très régulièrement avec "Un autre enrichissement est
@@ -305,6 +313,14 @@ function doPost(e) {
 
     if (corps.action === "alerteAnomalieScraping") {
       return traiterAlerteAnomalieScrapingV1_(corps);
+    }
+
+    // NOUVEAU (16/09/2026) -- appelé par scripts/verifier-urls-letterboxd.js
+    // (GitHub Actions, déclenchement manuel) via la nouvelle route Vercel
+    // api/rapport-verification-letterboxd.js -- voir traiterRapportVerificationLetterboxdV1_
+    // pour le détail.
+    if (corps.action === "rapportVerificationLetterboxd") {
+      return traiterRapportVerificationLetterboxdV1_(corps);
     }
 
     const id = safeTrim_(corps.id || "");
@@ -863,6 +879,79 @@ function traiterAlerteAnomalieScrapingV1_(corps) {
   );
 
   return reponseJsonWebhook_({ ok: true, mailEnvoye: !!destinataires });
+}
+
+/**
+ * NOUVEAU (16/09/2026) -- Rapport de vérification des URL Letterboxd
+ * déjà résolues (pas les fiches encore en attente -- celles-là ont leur
+ * propre mécanisme). Déclenché ponctuellement (pas de cron) depuis
+ * GitHub Actions via scripts/verifier-urls-letterboxd.js, qui revérifie
+ * chaque URL "/film/..." déjà en base en la comparant au titre/année
+ * de la fiche -- même logique de correspondance que celle utilisée à
+ * l'écriture (resoudre-letterboxd.js), donc tout ce qui apparaît ici
+ * est une fiche qui NE PASSERAIT PLUS le contrôle si elle était
+ * résolue aujourd'hui. Ne corrige rien automatiquement -- envoie
+ * juste la liste, à vérifier et corriger à la main (voir le contexte :
+ * découverte le 16/09/2026 sur "Les Seigneurs de Dogtown", qui pointait
+ * vers la page Letterboxd de "Canines").
+ *
+ * corps.suspects : [{ id, titre, annee, urlLetterboxd,
+ *                      titrePageTrouvee, anneePageTrouvee }, ...]
+ * corps.totalVerifies : nombre total de fiches passées en revue
+ * (pas seulement les suspectes) -- affiché dans le mail pour donner
+ * l'échelle du contrôle effectué.
+ */
+function traiterRapportVerificationLetterboxdV1_(corps) {
+  const suspects = Array.isArray(corps.suspects) ? corps.suspects : [];
+  const totalVerifies = Number(corps.totalVerifies) || 0;
+
+  if (suspects.length === 0) {
+    journal_("VERIFICATION_LETTERBOXD", "RAPPORT", "OK_AUCUNE_ANOMALIE", "Total vérifié=" + totalVerifies);
+    return reponseJsonWebhook_({ ok: true, mailEnvoye: false, raison: "aucune anomalie" });
+  }
+
+  const destinataires = destinatairesPourService_("AlerteTechnique");
+  if (destinataires) {
+    const lignes = suspects.map(function (s) {
+      return '<tr>' +
+        '<td style="padding:10px 0;border-bottom:1px solid #E3D9C4;font-family:Arial,sans-serif;font-size:13px;color:#3A2E22">' +
+        '<strong>' + (s.titre || "?") + '</strong> (' + (s.annee || "?") + ') — <span style="color:#9A9182">' + (s.id || "") + '</span><br>' +
+        'En base : <a href="' + (s.urlLetterboxd || "#") + '" style="color:#B5622B">' + (s.urlLetterboxd || "(vide)") + '</a><br>' +
+        'Page trouvée : "' + (s.titrePageTrouvee || "?") + '"' + (s.anneePageTrouvee ? ' (' + s.anneePageTrouvee + ')' : '') +
+        '</td></tr>';
+    }).join("");
+
+    const corpsHtml =
+      '<!DOCTYPE html><html><head><meta charset="UTF-8"></head>' +
+      '<body style="margin:0;padding:0;background:#F5EFE0"><div style="background:#F5EFE0;padding:24px 12px">' +
+      '<div style="background:#FFFBF2;border-radius:8px;padding:28px 22px;max-width:520px;margin:0 auto;font-family:Georgia,serif">' +
+      '<div style="font-size:22px;font-weight:bold;color:#3A2E22">CINÉ<span style="color:#B5622B">MAISON</span></div>' +
+      '<div style="font-size:11px;letter-spacing:1.5px;color:#B5622B;margin-top:4px;font-family:Arial,sans-serif">' +
+      'VÉRIFICATION URL LETTERBOXD</div>' +
+      '<div style="border-top:1px solid #E3D9C4;margin:16px 0"></div>' +
+      '<p style="font-size:13px;color:#3A2E22;font-family:Arial,sans-serif">' +
+      '<strong>' + suspects.length + ' fiche(s) suspecte(s)</strong> sur ' + totalVerifies + ' vérifiée(s) -- ' +
+      'le titre trouvé sur la page Letterboxd enregistrée ne correspond pas (ou plus) au titre de la fiche.</p>' +
+      '<table style="width:100%;border-collapse:collapse;margin-top:8px">' + lignes + '</table>' +
+      '<p style="font-size:11px;color:#9A9182;font-family:Arial,sans-serif;margin-top:16px">' +
+      'Rien n\'a été corrigé automatiquement -- à vérifier et corriger à la main dans le Sheet.</p>' +
+      '</div></div></body></html>';
+
+    MailApp.sendEmail({
+      to: destinataires,
+      subject: "CinéMaison - V2 - ⚠ " + suspects.length + " URL Letterboxd à vérifier",
+      htmlBody: corpsHtml,
+    });
+  }
+
+  journal_(
+    "VERIFICATION_LETTERBOXD",
+    "RAPPORT",
+    destinataires ? "OK" : "IGNORE_SANS_DESTINATAIRE",
+    suspects.length + " suspecte(s) / " + totalVerifies + " vérifiée(s)"
+  );
+
+  return reponseJsonWebhook_({ ok: true, mailEnvoye: !!destinataires, suspectsSignales: suspects.length });
 }
 
 /**
