@@ -7,7 +7,13 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.12
+ * Version: 2.13
+ *
+ * Correctif V2.13 (17/09/2026) : ajout d'un lien "Corriger dans l'app"
+ * par fiche suspecte, à côté de "C'est la bonne URL" -- ouvre
+ * directement la fiche concernée en mode édition dans l'app
+ * (App.jsx, lien profond ?film=ID&edit=1), sans avoir à la rechercher
+ * à la main.
  *
  * Correctif V2.12 (17/09/2026) : le mail de vérification Letterboxd
  * (traiterRapportVerificationLetterboxdV1_) affiche maintenant la
@@ -940,6 +946,11 @@ function traiterRapportVerificationLetterboxdV1_(corps) {
         "&url=" + encodeURIComponent(s.urlLetterboxd || "") +
         "&titre=" + encodeURIComponent(s.titre || "") +
         "&pw=" + encodeURIComponent(motDePasse);
+      // NOUVEAU (17/09/2026) : lien profond vers l'app (App.jsx,
+      // ?film=ID&edit=1) -- ouvre directement la fiche concernée en
+      // mode édition, sans avoir à la rechercher à la main. Même
+      // domaine que l'API (baseUrl), c'est la même appli Vercel.
+      const corrigerUrl = baseUrl + "/?film=" + encodeURIComponent(s.id || "") + "&edit=1";
 
       return '<div style="display:flex;align-items:flex-start;padding:10px 0;border-bottom:1px solid #E3D9C4">' +
         vignetteHtml(s.affiche) +
@@ -947,6 +958,7 @@ function traiterRapportVerificationLetterboxdV1_(corps) {
         '<strong>' + (s.titre || "?") + '</strong> (' + (s.annee || "?") + ') — <span style="color:#9A9182">' + (s.id || "") + '</span><br>' +
         'En base : <a href="' + (s.urlLetterboxd || "#") + '" style="color:#B5622B">' + (s.urlLetterboxd || "(vide)") + '</a><br>' +
         'Page trouvée : "' + (s.titrePageTrouvee || "?") + '"' + (s.anneePageTrouvee ? ' (' + s.anneePageTrouvee + ')' : '') + '<br>' +
+        '<a href="' + corrigerUrl + '" style="color:#B5622B">Corriger dans l\'app</a> &middot; ' +
         '<a href="' + confirmerUrl + '" style="color:#9A9182">C\'est la bonne URL</a>' +
         '</div></div>';
     }).join("");
