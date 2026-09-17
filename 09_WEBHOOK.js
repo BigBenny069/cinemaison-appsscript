@@ -7,7 +7,12 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.13
+ * Version: 2.14
+ *
+ * Correctif V2.14 (17/09/2026) : ajout de la plateforme et de la durée
+ * à côté du titre de chaque fiche suspecte, dans le mail de
+ * vérification Letterboxd -- aide à repérer d'un coup d'œil un
+ * doublon/une confusion entre deux films.
  *
  * Correctif V2.13 (17/09/2026) : ajout d'un lien "Corriger dans l'app"
  * par fiche suspecte, à côté de "C'est la bonne URL" -- ouvre
@@ -956,6 +961,7 @@ function traiterRapportVerificationLetterboxdV1_(corps) {
         vignetteHtml(s.affiche) +
         '<div style="font-size:13px;color:#3A2E22;font-family:Arial,sans-serif">' +
         '<strong>' + (s.titre || "?") + '</strong> (' + (s.annee || "?") + ') — <span style="color:#9A9182">' + (s.id || "") + '</span><br>' +
+        '<span style="color:#9A9182">' + (s.plateforme || "?") + (s.duree ? " · " + s.duree : "") + '</span><br>' +
         'En base : <a href="' + (s.urlLetterboxd || "#") + '" style="color:#B5622B">' + (s.urlLetterboxd || "(vide)") + '</a><br>' +
         'Page trouvée : "' + (s.titrePageTrouvee || "?") + '"' + (s.anneePageTrouvee ? ' (' + s.anneePageTrouvee + ')' : '') + '<br>' +
         '<a href="' + corrigerUrl + '" style="color:#B5622B">Corriger dans l\'app</a> &middot; ' +
