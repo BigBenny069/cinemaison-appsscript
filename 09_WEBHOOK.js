@@ -7,7 +7,14 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.11
+ * Version: 2.12
+ *
+ * Correctif V2.12 (17/09/2026) : le mail de vérification Letterboxd
+ * (traiterRapportVerificationLetterboxdV1_) affiche maintenant la
+ * vignette de chaque fiche (même gabarit que le rapport d'écarts) et
+ * ajoute un lien "C'est la bonne URL" par fiche, qui l'exclut des
+ * prochains audits tant que son URL ne change pas (voir
+ * lib/letterboxd-ignores.js côté Vercel).
  *
  * Correctif V2.11 (16/09/2026) : nouvelle action
  * "rapportVerificationLetterboxd" -- reçoit la liste des fiches
@@ -912,13 +919,36 @@ function traiterRapportVerificationLetterboxdV1_(corps) {
 
   const destinataires = destinatairesPourService_("AlerteTechnique");
   if (destinataires) {
+    // NOUVEAU (17/09/2026) : vignette d'affiche (même gabarit que
+    // construireHtmlRapportEcartsV1_, 50x75, coins arrondis, placeholder
+    // gris si pas d'affiche) + lien "C'est la bonne URL" par fiche
+    // (api/confirm.js?page=letterboxdOk) qui évite de la resignaler au
+    // prochain audit tant que son URL ne change pas -- voir
+    // lib/letterboxd-ignores.js côté Vercel.
+    const motDePasse = String(lireConfig_("AddFilmPassword", ""));
+    const baseUrl = "https://cinemaison-v2.vercel.app";
+
+    function vignetteHtml(urlAffiche) {
+      return urlAffiche
+        ? '<img src="' + urlAffiche + '" width="50" height="75" style="border-radius:4px;object-fit:cover;flex-shrink:0;margin-right:12px" alt="">'
+        : '<div style="width:50px;height:75px;border-radius:4px;background:#E3D9C4;flex-shrink:0;margin-right:12px"></div>';
+    }
+
     const lignes = suspects.map(function (s) {
-      return '<tr>' +
-        '<td style="padding:10px 0;border-bottom:1px solid #E3D9C4;font-family:Arial,sans-serif;font-size:13px;color:#3A2E22">' +
+      const confirmerUrl = baseUrl + "/api/confirm?page=letterboxdOk" +
+        "&id=" + encodeURIComponent(s.id || "") +
+        "&url=" + encodeURIComponent(s.urlLetterboxd || "") +
+        "&titre=" + encodeURIComponent(s.titre || "") +
+        "&pw=" + encodeURIComponent(motDePasse);
+
+      return '<div style="display:flex;align-items:flex-start;padding:10px 0;border-bottom:1px solid #E3D9C4">' +
+        vignetteHtml(s.affiche) +
+        '<div style="font-size:13px;color:#3A2E22;font-family:Arial,sans-serif">' +
         '<strong>' + (s.titre || "?") + '</strong> (' + (s.annee || "?") + ') — <span style="color:#9A9182">' + (s.id || "") + '</span><br>' +
         'En base : <a href="' + (s.urlLetterboxd || "#") + '" style="color:#B5622B">' + (s.urlLetterboxd || "(vide)") + '</a><br>' +
-        'Page trouvée : "' + (s.titrePageTrouvee || "?") + '"' + (s.anneePageTrouvee ? ' (' + s.anneePageTrouvee + ')' : '') +
-        '</td></tr>';
+        'Page trouvée : "' + (s.titrePageTrouvee || "?") + '"' + (s.anneePageTrouvee ? ' (' + s.anneePageTrouvee + ')' : '') + '<br>' +
+        '<a href="' + confirmerUrl + '" style="color:#9A9182">C\'est la bonne URL</a>' +
+        '</div></div>';
     }).join("");
 
     const corpsHtml =
@@ -932,9 +962,10 @@ function traiterRapportVerificationLetterboxdV1_(corps) {
       '<p style="font-size:13px;color:#3A2E22;font-family:Arial,sans-serif">' +
       '<strong>' + suspects.length + ' fiche(s) suspecte(s)</strong> sur ' + totalVerifies + ' vérifiée(s) -- ' +
       'le titre trouvé sur la page Letterboxd enregistrée ne correspond pas (ou plus) au titre de la fiche.</p>' +
-      '<table style="width:100%;border-collapse:collapse;margin-top:8px">' + lignes + '</table>' +
+      lignes +
       '<p style="font-size:11px;color:#9A9182;font-family:Arial,sans-serif;margin-top:16px">' +
-      'Rien n\'a été corrigé automatiquement -- à vérifier et corriger à la main dans le Sheet.</p>' +
+      'Rien n\'a été corrigé automatiquement -- si le titre est une erreur, corrige l\'URL à la main dans le Sheet ; ' +
+      'si c\'est en fait la bonne page (juste affichée en anglais), clique "C\'est la bonne URL" pour ne plus la voir ici.</p>' +
       '</div></div></body></html>';
 
     MailApp.sendEmail({
