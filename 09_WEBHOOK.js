@@ -7,7 +7,15 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.15
+ * Version: 2.16
+ *
+ * Correctif V2.16 (18/09/2026) : mail "RAS" (envoyerMailRasSuggestionsV1_)
+ * quand une plateforme n'a ni suggestion ni ambiguïté à signaler --
+ * avant, rien n'était envoyé dans ce cas, impossible de distinguer
+ * "vraiment rien à signaler" d'un script planté avant d'y arriver.
+ * Concerne PRIME, NETFLIX, DISNEY et CANAL (les 4 collecteurs
+ * appellent désormais systématiquement alerteSuggestionsPrime/
+ * Streaming, plus seulement quand il y a du contenu).
  *
  * Correctif V2.15 (18/09/2026) : garde-fou anti-doublon
  * (dejaTraiteRecemment_, via CacheService) sur les 5 actions qui
@@ -640,11 +648,45 @@ function dejaTraiteRecemment_(cle) {
   return false;
 }
 
+/**
+ * NOUVEAU (18/09/2026) -- mail "RAS" quand une plateforme n'a ni
+ * suggestion ni ambiguïté à signaler, plutôt que rien du tout.
+ * Demandé par Ben : sans ce mail, impossible de distinguer "vraiment
+ * rien à signaler" d'un script qui aurait planté avant d'arriver
+ * jusqu'à cette étape -- ce mail confirme que le contrôle est bien
+ * allé jusqu'au bout. Concerne les 4 plateformes (PRIME, NETFLIX,
+ * DISNEY, CANAL) puisque toutes passent par l'une des deux fonctions
+ * ci-dessous.
+ */
+function envoyerMailRasSuggestionsV1_(plateforme, service) {
+  const destinataires = destinatairesPourService_(service);
+  if (destinataires) {
+    const corpsHtml =
+      '<!DOCTYPE html><html><head><meta charset="UTF-8"></head>' +
+      '<body style="margin:0;padding:0;background:#F5EFE0"><div style="background:#F5EFE0;padding:24px 12px">' +
+      '<div style="background:#FFFBF2;border-radius:8px;padding:28px 22px;max-width:520px;margin:0 auto;font-family:Georgia,serif">' +
+      '<div style="font-size:22px;font-weight:bold;color:#3A2E22">CINÉ<span style="color:#B5622B">MAISON</span></div>' +
+      '<div style="font-size:11px;letter-spacing:1.5px;color:#B5622B;margin-top:4px;font-family:Arial,sans-serif">' +
+      plateforme + ' &middot; AUCUNE SUGGESTION</div>' +
+      '<div style="border-top:1px solid #E3D9C4;margin:16px 0"></div>' +
+      '<p style="font-size:13px;color:#3A2E22;font-family:Arial,sans-serif">' +
+      'Contrôle ' + plateforme + ' exécuté avec succès -- aucune nouvelle suggestion ni ambiguïté à signaler cette fois.</p>' +
+      '</div></div></body></html>';
+    MailApp.sendEmail({ to: destinataires, subject: "CinéMaison - V2 - RAS (" + plateforme + ")", htmlBody: corpsHtml });
+  }
+  return !!destinataires;
+}
+
 function traiterAlerteSuggestionsPrimeV1_(corps) {
   const fiches = Array.isArray(corps.fiches) ? corps.fiches : [];
   const ambiguites = Array.isArray(corps.ambiguites) ? corps.ambiguites : [];
   if (fiches.length === 0 && ambiguites.length === 0) {
-    return reponseJsonWebhook_({ ok: false, error: "fiches et ambiguites vides" }, 400);
+    if (dejaTraiteRecemment_("alerteSuggestionsPrime_RAS")) {
+      return reponseJsonWebhook_({ ok: true, mailEnvoye: false, doublonIgnore: true });
+    }
+    const mailEnvoye = envoyerMailRasSuggestionsV1_("PRIME", "AjoutAutoPrime");
+    journal_("PRIME_SUGGESTIONS", "ALERTE_MAIL", "OK_RAS", "Aucune suggestion ni ambiguïté");
+    return reponseJsonWebhook_({ ok: true, mailEnvoye: mailEnvoye, ras: true });
   }
 
   // Voir dejaTraiteRecemment_ ci-dessus.
@@ -776,7 +818,12 @@ function traiterAlerteSuggestionsStreamingV1_(corps) {
   const fiches = Array.isArray(corps.fiches) ? corps.fiches : [];
   const ambiguites = Array.isArray(corps.ambiguites) ? corps.ambiguites : [];
   if (fiches.length === 0 && ambiguites.length === 0) {
-    return reponseJsonWebhook_({ ok: false, error: "fiches et ambiguites vides" }, 400);
+    if (dejaTraiteRecemment_("alerteSuggestionsStreaming_RAS_" + plateforme)) {
+      return reponseJsonWebhook_({ ok: true, mailEnvoye: false, doublonIgnore: true });
+    }
+    const mailEnvoye = envoyerMailRasSuggestionsV1_(plateforme, "AjoutAutoPrime");
+    journal_(plateforme + "_SUGGESTIONS", "ALERTE_MAIL", "OK_RAS", "Aucune suggestion ni ambiguïté");
+    return reponseJsonWebhook_({ ok: true, mailEnvoye: mailEnvoye, ras: true });
   }
 
   // Voir dejaTraiteRecemment_ plus haut.
