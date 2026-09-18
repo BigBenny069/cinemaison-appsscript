@@ -7,7 +7,16 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.14
+ * Version: 2.15
+ *
+ * Correctif V2.15 (18/09/2026) : garde-fou anti-doublon
+ * (dejaTraiteRecemment_, via CacheService) sur les 5 actions qui
+ * envoient un mail non-idempotent (suggestions Prime/Netflix/Disney,
+ * résumé de contrôle Prime/Netflix/Disney, statut inconnu) --
+ * corrige des mails reçus en double/triple quand lib-webhook.js (côté
+ * collecteurs Node) réessaie un appel dont la réponse n'est pas
+ * revenue proprement côté client, alors qu'Apps Script avait déjà
+ * fini de le traiter.
  *
  * Correctif V2.14 (17/09/2026) : ajout de la plateforme et de la durée
  * à côté du titre de chaque fiche suspecte, dans le mail de
@@ -600,11 +609,50 @@ function relancerVerificationEtMailDisney() {
 }
 
 
+/**
+ * NOUVEAU (18/09/2026) -- garde-fou anti-doublon. lib-webhook.js (côté
+ * collecteurs Node) réessaie automatiquement un appel webhook si la
+ * réponse ne revient pas proprement côté client (timeout, coupure
+ * réseau) -- mais Apps Script, lui, peut très bien avoir déjà terminé
+ * le traitement (et envoyé le mail) avant que la connexion ne lâche.
+ * Bug réel constaté le 18/09/2026 : mails Prime/Netflix reçus en
+ * double, Disney en triple -- chacun précédé d'autant de "tentative
+ * échouée" côté Node juste avant.
+ *
+ * Utilise CacheService (mémoire partagée à tout le projet, TTL max
+ * 6h) pour retenir la signature d'une requête déjà traitée pendant une
+ * courte fenêtre -- largement plus longue que les réessais de
+ * lib-webhook.js (3s puis 3s, donc <10s en tout), mais courte pour ne
+ * jamais bloquer une vraie exécution différente plus tard dans la
+ * journée.
+ *
+ * @param {string} cle - signature unique de CETTE requête précise
+ *   (action + plateforme + assez de contenu pour la distinguer d'une
+ *   autre requête légitime -- jamais juste l'action seule)
+ * @return {boolean} true si cette même requête a déjà été traitée
+ *   dans les 2 dernières minutes (mail déjà envoyé -- ne pas recommencer)
+ */
+function dejaTraiteRecemment_(cle) {
+  const cache = CacheService.getScriptCache();
+  const cleCache = "webhook_dedup_" + cle;
+  if (cache.get(cleCache)) return true;
+  cache.put(cleCache, "1", 120); // 120s = 2 min
+  return false;
+}
+
 function traiterAlerteSuggestionsPrimeV1_(corps) {
   const fiches = Array.isArray(corps.fiches) ? corps.fiches : [];
   const ambiguites = Array.isArray(corps.ambiguites) ? corps.ambiguites : [];
   if (fiches.length === 0 && ambiguites.length === 0) {
     return reponseJsonWebhook_({ ok: false, error: "fiches et ambiguites vides" }, 400);
+  }
+
+  // Voir dejaTraiteRecemment_ ci-dessus.
+  const signature = "alerteSuggestionsPrime_" +
+    fiches.concat(ambiguites).map(function(f) { return f.titre; }).join("|");
+  if (dejaTraiteRecemment_(signature)) {
+    journal_("PRIME_SUGGESTIONS", "ALERTE_MAIL", "IGNORE_DOUBLON_RECENT", "Requête identique déjà traitée dans les 2 dernières minutes");
+    return reponseJsonWebhook_({ ok: true, mailEnvoye: false, doublonIgnore: true });
   }
 
   const destinataires = destinatairesPourService_("AjoutAutoPrime");
@@ -644,6 +692,16 @@ function traiterAlerteSuggestionsPrimeV1_(corps) {
  * pointe vers la page de confirmation Vercel (api/controle-prime-confirm.js).
  */
 function traiterLancerVerificationControlePrimeV1_(corps) {
+  // Voir dejaTraiteRecemment_ plus haut. Ici la requête n'a pas de
+  // contenu variable propre (juste "lance la simulation Prime") --
+  // l'action seule suffit comme signature, un vrai second lancement
+  // volontaire dans les 2 minutes qui suivent serait de toute façon
+  // très inhabituel pour ce contrôle.
+  if (dejaTraiteRecemment_("lancerVerificationControlePrime")) {
+    journal_("CONTROLE_PRIME", "VERIFICATION_AUTO", "IGNORE_DOUBLON_RECENT", "Requête identique déjà traitée dans les 2 dernières minutes");
+    return reponseJsonWebhook_({ ok: true, mailEnvoye: false, doublonIgnore: true });
+  }
+
   const resume = verifierResultatsPrimeOfficielSansEcriture();
   sauvegarderDernierDetailControleV1_("PRIME", resume.details);
 
@@ -721,6 +779,14 @@ function traiterAlerteSuggestionsStreamingV1_(corps) {
     return reponseJsonWebhook_({ ok: false, error: "fiches et ambiguites vides" }, 400);
   }
 
+  // Voir dejaTraiteRecemment_ plus haut.
+  const signature = "alerteSuggestionsStreaming_" + plateforme + "_" +
+    fiches.concat(ambiguites).map(function(f) { return f.titre; }).join("|");
+  if (dejaTraiteRecemment_(signature)) {
+    journal_(plateforme + "_SUGGESTIONS", "ALERTE_MAIL", "IGNORE_DOUBLON_RECENT", "Requête identique déjà traitée dans les 2 dernières minutes");
+    return reponseJsonWebhook_({ ok: true, mailEnvoye: false, doublonIgnore: true });
+  }
+
   const destinataires = destinatairesPourService_("AjoutAutoPrime");
   if (destinataires) {
     const corpsHtml = construireHtmlSuggestionsPrimeV1_(fiches, ambiguites, plateforme);
@@ -756,6 +822,13 @@ function traiterAlerteSuggestionsStreamingV1_(corps) {
  */
 function traiterLancerVerificationControleStreamingV1_(corps) {
   const plateforme = String(corps.plateforme || "").trim();
+
+  // Voir dejaTraiteRecemment_ plus haut.
+  if (dejaTraiteRecemment_("lancerVerificationControleStreaming_" + plateforme)) {
+    journal_("CONTROLE_" + plateforme, "VERIFICATION_AUTO", "IGNORE_DOUBLON_RECENT", "Requête identique déjà traitée dans les 2 dernières minutes");
+    return reponseJsonWebhook_({ ok: true, mailEnvoye: false, doublonIgnore: true });
+  }
+
   const resume = verifierResultatsStreamingOfficielSansEcriture(plateforme);
   sauvegarderDernierDetailControleV1_(plateforme, resume.details);
 
@@ -813,6 +886,14 @@ function traiterAlerteStatutInconnuStreamingV1_(corps) {
   const fiches = Array.isArray(corps.fiches) ? corps.fiches : [];
   if (fiches.length === 0) {
     return reponseJsonWebhook_({ ok: false, error: "fiches vide" }, 400);
+  }
+
+  // Voir dejaTraiteRecemment_ plus haut.
+  const signature = "alerteStatutInconnuStreaming_" + plateforme + "_" +
+    fiches.map(function(f) { return f.titre; }).join("|");
+  if (dejaTraiteRecemment_(signature)) {
+    journal_(plateforme, "STATUT_INCONNU", "IGNORE_DOUBLON_RECENT", "Requête identique déjà traitée dans les 2 dernières minutes");
+    return reponseJsonWebhook_({ ok: true, mailEnvoye: false, doublonIgnore: true });
   }
 
   const destinataires = destinatairesPourService_("AjoutAutoPrime");
