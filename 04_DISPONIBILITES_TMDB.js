@@ -3,10 +3,17 @@
  * CinéMaison V4
  * Script : 04_DISPONIBILITES_TMDB.gs
  * Rôle   : Watch Providers TMDb uniquement
- * Version: 4.0.0
+ * Version: 4.0.1
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs
  * IMPORTANT : ne touche jamais DateDisponibiliteAuto.
  * ============================================================
+ *
+ * Correctif V4.0.1 (19/09/2026) : ajout d'un garde-fou défensif
+ * (avertirSiTypeInattendu_, 01_UTILS.gs) avant le choix d'endpoint
+ * movie/tv déduit de Type -- Phase D (Étape 3) du chantier "Séparer
+ * Catégorie et Statut dans Type". Ne change aucun comportement,
+ * journalise juste si Type contenait un jour autre chose qu'une des 4
+ * catégories attendues.
  */
 
 
@@ -158,6 +165,7 @@ function getWatchProviders_(tmdbId, type, apiKeyParam) {
   if (!apiKey) return { plateformes: "" };
 
 
+  avertirSiTypeInattendu_(type, "getWatchProviders_");
   const endpoint = type === "Série" ? "tv" : "movie";
   const pays = paysWatchProvider_();
 
