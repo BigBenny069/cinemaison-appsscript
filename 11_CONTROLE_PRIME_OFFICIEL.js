@@ -6,7 +6,7 @@
  * Version : 1.5 (19/09/2026)
  * ============================================================
  *
- * Correctif V1.5 (19/09/2026) : ajout de migrerTypeVersStatutAccesV1_(),
+ * Correctif V1.5 (19/09/2026) : ajout de migrerTypeVersStatutAccesV1(),
  * migration ponctuelle Phase C du chantier "Séparer Catégorie et
  * Statut dans Type" -- transfère les statuts VOD/Indispo/Bientôt
  * disponible actuellement mélangés dans Type vers une nouvelle
@@ -646,7 +646,7 @@ function ajouterColonneTypeContenuOriginalV1() {
  * Idempotent : sans effet si relancé -- une fiche déjà migrée a
  * Type="Film", donc plus dans STATUTS_A_MIGRER_V1 au tour suivant.
  */
-function migrerTypeVersStatutAccesV1_() {
+function migrerTypeVersStatutAccesV1() {
   const classeur = SpreadsheetApp.getActiveSpreadsheet();
   const films = classeur.getSheetByName("Films");
   if (!films) throw new Error("La feuille Films est introuvable.");
