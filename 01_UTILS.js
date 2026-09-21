@@ -3,8 +3,12 @@
  * CinéMaison V4
  * Script : 01_UTILS.gs
  * Rôle   : Utilitaires communs sécurisés
- * Version: 4.2.0
+ * Version: 4.2.1
  * ============================================================
+ *
+ * Correctif 4.2.1 (19/09/2026) : ajout de avertirSiTypeInattendu_(),
+ * garde-fou défensif Phase D (Étape 3) du chantier "Séparer Catégorie
+ * et Statut dans Type" -- voir 02_TMDB.gs et 04_DISPONIBILITES_TMDB.gs.
  */
 
 
@@ -744,6 +748,38 @@ function testerRaccordementResolutionsV413() {
  * Tests
  * =========================
  */
+
+
+/**
+ * NOUVEAU (19/09/2026) -- Phase D (Étape 3) du chantier "Séparer
+ * Catégorie et Statut dans Type". Depuis la migration (voir
+ * 11_CONTROLE_PRIME_OFFICIEL.gs V1.6), Type ne porte plus jamais un
+ * statut (VOD/Indispo/Bientôt disponible/Abonnement complémentaire) --
+ * uniquement une de ces 4 catégories. Le statut vit désormais
+ * exclusivement dans StatutAcces.
+ */
+const CATEGORIES_CONNUES_V1 = Object.freeze(["Film", "Série", "Documentaire", "Spectacle"]);
+
+/**
+ * Purement défensif -- utilisé avant un choix d'endpoint TMDb (movie
+ * vs tv) déduit de Type (02_TMDB.gs, 04_DISPONIBILITES_TMDB.gs). Ne
+ * change jamais le comportement (le choix par défaut movie/tv reste
+ * strictement identique), journalise juste explicitement si Type
+ * contenait autre chose qu'une des 4 catégories attendues -- pour
+ * repérer immédiatement une régression future (une écriture erronée
+ * dans Type ailleurs dans le code) plutôt que de deviner en silence
+ * le mauvais endpoint comme avant la migration.
+ */
+function avertirSiTypeInattendu_(type, contexte) {
+  const valeur = String(type || "").trim();
+  if (valeur && CATEGORIES_CONNUES_V1.indexOf(valeur) === -1) {
+    Logger.log(
+      "  [Type inattendu] " + contexte + " : Type=\"" + valeur + "\" n'est " +
+      "aucune des 4 catégories connues (Film/Série/Documentaire/Spectacle) " +
+      "-- endpoint TMDb déduit par défaut (movie), à vérifier."
+    );
+  }
+}
 
 
 function testUtilsV4() {
