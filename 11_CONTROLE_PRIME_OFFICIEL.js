@@ -3,8 +3,27 @@
  * CinéMaison V4
  * Script  : 11_CONTROLE_PRIME_OFFICIEL.gs
  * Rôle    : Diagnostic et import sécurisé des résultats Prime Video officiels
- * Version : 1.5 (19/09/2026)
+ * Version : 1.6 (19/09/2026)
  * ============================================================
+ *
+ * Correctif V1.6 (19/09/2026) : remplace le mécanisme V1.2 ci-dessous
+ * -- Phase D du chantier "Séparer Catégorie et Statut dans Type" (voir
+ * migration Phase C, migrerTypeVersStatutAccesV1(), et Phase D côté
+ * Vercel/App.jsx). Le statut Prime détecté (StatutPrimeDetecte) est
+ * désormais écrit dans une colonne StatutAcces DÉDIÉE :
+ *   - INDISPONIBLE -> StatutAcces = "Indispo"
+ *   - VOD -> StatutAcces = "VOD"
+ *   - BIENTOT_DISPONIBLE -> StatutAcces = "Bientôt disponible"
+ *   - ABONNEMENT_COMPLEMENTAIRE -> StatutAcces = "Abonnement complémentaire"
+ *     (vue dédiée + badge "ABO SUPP" prévus côté App.jsx, Phase D)
+ *   - INCLUS -> StatutAcces = "Inclus"
+ *   - (INCONNU n'arrive plus jusqu'ici : filtré en amont côté
+ *     prime.js, jamais écrit dans CONTROLE_PRIME -- voir
+ *     alerterStatutsInconnusPrime_, 18/09/2026)
+ * Type n'est PLUS JAMAIS modifié par ce mécanisme -- il ne porte plus
+ * que la catégorie (Film/Série/Documentaire/Spectacle), fixée une
+ * fois pour toutes par la migration Phase C. TypeContenuOriginal
+ * devient donc inutile (jamais créée en pratique de toute façon).
  *
  * Correctif V1.5 (19/09/2026) : ajout de migrerTypeVersStatutAccesV1(),
  * migration ponctuelle Phase C du chantier "Séparer Catégorie et
@@ -29,9 +48,10 @@
  * détail" du mail de contrôle (voir 09_WEBHOOK.gs). Aucune ligne de
  * la logique de validation existante n'a été modifiée ou supprimée.
  *
- * Correctif V1.2 : mise à jour automatique de Type selon le statut
- * Prime détecté (StatutPrimeDetecte, 7e colonne CONTROLE_PRIME,
- * ajoutée par api/controle-prime.js V1.1) :
+ * Correctif V1.2 (historique, remplacé par V1.6 ci-dessus) : mise à
+ * jour automatique de Type selon le statut Prime détecté
+ * (StatutPrimeDetecte, 7e colonne CONTROLE_PRIME, ajoutée par
+ * api/controle-prime.js V1.1) :
  *   - INDISPONIBLE -> Type = "Indispo"
  *   - VOD -> Type = "VOD"
  *   - BIENTOT_DISPONIBLE -> Type = "Bientôt disponible"
@@ -72,19 +92,15 @@ const PRIME_SOURCE_OFFICIELLE_V110 = "PRIME VIDEO OFFICIEL";
 const PRIME_PLATEFORME_V110 = "PRIME VIDEO";
 const PRIME_AGE_MAX_RESULTAT_JOURS_V111 = 7;
 
-// V1.2 (08/09/2026) : mise à jour automatique de Type.
-const PRIME_STATUT_VERS_TYPE_V1 = Object.freeze({
+// V2.0 (19/09/2026) : écrit dans StatutAcces, jamais dans Type -- voir
+// le correctif détaillé en tête de fichier.
+const PRIME_STATUT_VERS_STATUTACCES_V1 = Object.freeze({
   "INDISPONIBLE": "Indispo",
   "VOD": "VOD",
   "BIENTOT_DISPONIBLE": "Bientôt disponible",
+  "ABONNEMENT_COMPLEMENTAIRE": "Abonnement complémentaire",
+  "INCLUS": "Inclus",
 });
-// Valeurs de Type qui sont déjà un statut écrasé (pas un vrai contenu)
-// -- si TypeContenuOriginal est vide ET que Type vaut une de ces
-// valeurs, on ne peut plus retrouver le vrai contenu avec certitude ;
-// on part du principe que c'était "Film" (cas très majoritaire chez
-// Ben), en le loggant explicitement à chaque fois.
-const PRIME_TYPES_ECRASES_V1 = Object.freeze(["Indispo", "VOD", "Bientôt disponible"]);
-const PRIME_TYPE_PAR_DEFAUT_V1 = "Film";
 
 
 
@@ -348,36 +364,32 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
     }
     controlesValides++;
 
-    // V1.2 (08/09/2026) : calcul du changement de Type éventuel, une
-    // seule fois ici -- appliqué dans les 3 branches d'écriture plus
-    // bas (AUCUNE_ALERTE, CONFLIT PROTÉGÉ, DATE_DETECTEE), car c'est
-    // indépendant du suivi de date (ça reflète juste la disponibilité
-    // actuelle détectée par Prime).
+    // V2.0 (19/09/2026) : calcul du changement de StatutAcces éventuel,
+    // une seule fois ici -- appliqué dans les 3 branches d'écriture
+    // plus bas (AUCUNE_ALERTE, CONFLIT PROTÉGÉ, DATE_DETECTEE), car
+    // c'est indépendant du suivi de date (ça reflète juste la
+    // disponibilité actuelle détectée par Prime). Type n'est plus
+    // jamais touché ici -- voir le correctif détaillé en tête de fichier.
     const statutPrimeDetecte = String(
       resultat[hResultats.StatutPrimeDetecte] || ""
     ).trim().toUpperCase();
-    const changementType = (hFilms.Type !== undefined)
-      ? calculerNouveauTypeV1_(
-          film.valeurs[hFilms.Type],
-          hFilms.TypeContenuOriginal !== undefined ? film.valeurs[hFilms.TypeContenuOriginal] : "",
-          statutPrimeDetecte
-        )
+    const nouveauStatutAcces = (hFilms.StatutAcces !== undefined)
+      ? calculerNouveauStatutAccesV1_(film.valeurs[hFilms.StatutAcces], statutPrimeDetecte)
       : null;
-    if (changementType && hFilms.TypeContenuOriginal === undefined) {
+    if (nouveauStatutAcces === null && hFilms.StatutAcces === undefined) {
       Logger.log(
-        "  [Type] TypeContenuOriginal introuvable dans Films -- lance " +
-        "ajouterColonneTypeContenuOriginalV1() une fois, Type non modifié pour " + idFilm + "."
+        "  [StatutAcces] Colonne StatutAcces introuvable dans Films -- lance " +
+        "migrerTypeVersStatutAccesV1() une fois (Phase C), StatutAcces non modifié pour " + idFilm + "."
       );
     }
 
-    function ecrireChangementTypeSiBesoin_() {
-      if (!changementType || hFilms.TypeContenuOriginal === undefined) return;
+    function ecrireStatutAccesSiBesoin_() {
+      if (!nouveauStatutAcces) return;
       Logger.log(
-        "  [Type] " + idFilm + " : " + (film.valeurs[hFilms.Type] || "(vide)") +
-        " -> " + changementType.nouveauType
+        "  [StatutAcces] " + idFilm + " : " + (film.valeurs[hFilms.StatutAcces] || "(vide)") +
+        " -> " + nouveauStatutAcces
       );
-      ecrireChampPrimeV110_(films, film.ligne, hFilms, "Type", changementType.nouveauType);
-      ecrireChampPrimeV110_(films, film.ligne, hFilms, "TypeContenuOriginal", changementType.nouveauTypeOriginal);
+      ecrireChampPrimeV110_(films, film.ligne, hFilms, "StatutAcces", nouveauStatutAcces);
     }
 
 
@@ -406,7 +418,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
           ecrireChampPrimeV110_(films, film.ligne, hFilms,
             "PlateformesDetectees", plateformesApres);
         }
-        ecrireChangementTypeSiBesoin_();
+        ecrireStatutAccesSiBesoin_();
       }
       continue;
     }
@@ -474,7 +486,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
           ecrireChampPrimeV110_(films, film.ligne, hFilms,
             "PlateformesDetectees", plateformesApres);
         }
-        ecrireChangementTypeSiBesoin_();
+        ecrireStatutAccesSiBesoin_();
       }
       continue;
     }
@@ -519,7 +531,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
       ecrireChampPrimeV110_(films, film.ligne, hFilms,
         "DernierChangementDisponibilite", maintenant);
     }
-    ecrireChangementTypeSiBesoin_();
+    ecrireStatutAccesSiBesoin_();
   }
 
 
@@ -552,40 +564,19 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
 
 
 /**
- * Calcule le nouveau Type + TypeContenuOriginal à écrire à partir du
- * statut Prime détecté. Retourne null si rien ne doit changer (statut
- * non géré comme ABONNEMENT_COMPLEMENTAIRE/INCONNU, ou déjà à jour).
+ * Calcule la nouvelle valeur de StatutAcces à partir du statut Prime
+ * détecté. Beaucoup plus simple que l'ancienne calculerNouveauTypeV1_
+ * (V1.2-V1.5, historique) : StatutAcces est un champ dédié qui ne
+ * porte QUE le statut -- plus besoin de mémoriser/restaurer une
+ * catégorie ailleurs, Type n'est plus jamais touché ici. Retourne
+ * null si rien ne doit changer (statut non reconnu, ou déjà à jour).
  */
-function calculerNouveauTypeV1_(typeActuel, typeOriginalActuel, statutPrime) {
-  typeActuel = String(typeActuel || "").trim();
-  typeOriginalActuel = String(typeOriginalActuel || "").trim();
-
-  function origineOuDefaut() {
-    if (typeOriginalActuel) return typeOriginalActuel;
-    if (PRIME_TYPES_ECRASES_V1.indexOf(typeActuel) !== -1) {
-      Logger.log(
-        "  [Type] TypeContenuOriginal vide pour un Type déjà écrasé (" +
-        typeActuel + ") -- par défaut \"" + PRIME_TYPE_PAR_DEFAUT_V1 +
-        "\", à vérifier si ce n'était pas une Série/Documentaire/Spectacle."
-      );
-      return PRIME_TYPE_PAR_DEFAUT_V1;
-    }
-    return typeActuel || PRIME_TYPE_PAR_DEFAUT_V1;
-  }
-
-  if (statutPrime === "INCLUS") {
-    const original = origineOuDefaut();
-    if (typeActuel === original && typeOriginalActuel === original) return null;
-    return { nouveauType: original, nouveauTypeOriginal: original };
-  }
-
-  const nouveauLabel = PRIME_STATUT_VERS_TYPE_V1[statutPrime];
-  if (!nouveauLabel) return null; // ABONNEMENT_COMPLEMENTAIRE, INCONNU... : Type inchangé
-
-  const nouveauTypeOriginal = origineOuDefaut();
-  if (typeActuel === nouveauLabel && typeOriginalActuel === nouveauTypeOriginal) return null;
-
-  return { nouveauType: nouveauLabel, nouveauTypeOriginal: nouveauTypeOriginal };
+function calculerNouveauStatutAccesV1_(statutAccesActuel, statutPrime) {
+  statutAccesActuel = String(statutAccesActuel || "").trim();
+  const nouveauStatut = PRIME_STATUT_VERS_STATUTACCES_V1[statutPrime];
+  if (!nouveauStatut) return null; // statut Prime non reconnu -- StatutAcces inchangé
+  if (statutAccesActuel === nouveauStatut) return null; // déjà à jour
+  return nouveauStatut;
 }
 
 
@@ -627,7 +618,8 @@ function ajouterColonneTypeContenuOriginalV1() {
  * statut vers StatutAcces et restaure Type à "Film".
  *
  * "Film" pour toutes, sans distinction -- pas une supposition par
- * défaut comme PRIME_TYPE_PAR_DEFAUT_V1 ailleurs dans ce fichier :
+ * défaut comme l'ancien PRIME_TYPE_PAR_DEFAUT_V1 (V1.2-V1.5,
+ * supprimé en V2.0, plus nécessaire) :
  * les 109 fiches concernées à ce jour ont été listées et vérifiées à
  * la main par Ben (fichier migration-type-a-verifier.csv), confirmé
  * le 19/09/2026 qu'aucune n'est en réalité une Série/Documentaire/
