@@ -3,8 +3,17 @@
  * CinéMaison V4
  * Script  : 11_CONTROLE_PRIME_OFFICIEL.gs
  * Rôle    : Diagnostic et import sécurisé des résultats Prime Video officiels
- * Version : 1.4 (13/09/2026)
+ * Version : 1.5 (19/09/2026)
  * ============================================================
+ *
+ * Correctif V1.5 (19/09/2026) : ajout de migrerTypeVersStatutAccesV1_(),
+ * migration ponctuelle Phase C du chantier "Séparer Catégorie et
+ * Statut dans Type" -- transfère les statuts VOD/Indispo/Bientôt
+ * disponible actuellement mélangés dans Type vers une nouvelle
+ * colonne StatutAcces, restaure Type à "Film" pour ces fiches
+ * (vérifié à la main, aucune exception). À lancer une seule fois,
+ * avant le reste de la Phase D. N'ajoute ni ne modifie
+ * TypeContenuOriginal (jamais créée en pratique, devenue inutile).
  *
  * Correctif V1.4 (13/09/2026) : detailFiche_ plantait sur les 3
  * plateformes ("ReferenceError: idFilm is not defined") -- idFilm est
@@ -602,6 +611,84 @@ function ajouterColonneTypeContenuOriginalV1() {
   films.getRange(1, colonne).setValue("TypeContenuOriginal").setFontWeight("bold");
   Logger.log("Colonne TypeContenuOriginal ajoutée (colonne " + colonne + ").");
 }
+
+
+/**
+ * NOUVEAU (19/09/2026) -- migration ponctuelle, Phase C du chantier
+ * "Séparer Catégorie et Statut dans Type" (voir échange du
+ * 18-19/09/2026). À lancer UNE SEULE FOIS depuis l'éditeur Apps
+ * Script, avant le déploiement du reste de la Phase D (le code qui
+ * lira/écrira StatutAcces partout ailleurs -- App.jsx, get-films.js/
+ * update-film.js, les collecteurs, 02_TMDB.gs, 04_DISPONIBILITES_TMDB.gs).
+ *
+ * Ajoute la colonne StatutAcces si elle n'existe pas encore, puis pour
+ * chaque fiche où Type contient AUJOURD'HUI un statut (VOD/Indispo/
+ * Bientôt disponible) plutôt qu'une vraie catégorie : transfère ce
+ * statut vers StatutAcces et restaure Type à "Film".
+ *
+ * "Film" pour toutes, sans distinction -- pas une supposition par
+ * défaut comme PRIME_TYPE_PAR_DEFAUT_V1 ailleurs dans ce fichier :
+ * les 109 fiches concernées à ce jour ont été listées et vérifiées à
+ * la main par Ben (fichier migration-type-a-verifier.csv), confirmé
+ * le 19/09/2026 qu'aucune n'est en réalité une Série/Documentaire/
+ * Spectacle. Si de nouvelles fiches VOD/Indispo sont apparues entre
+ * cette vérification et le lancement de cette fonction, VÉRIFIE-LES
+ * D'ABORD à la main (filtre Type sur l'onglet Films) avant de lancer,
+ * sinon elles seraient basculées en "Film" sans contrôle.
+ *
+ * Contrairement à TypeContenuOriginal (colonne jamais créée en
+ * pratique malgré le correctif V1.2 -- devenue inutile avec cette
+ * séparation, plus besoin de "sauvegarder" la catégorie ailleurs une
+ * fois que Type ne contient plus jamais de statut), cette migration
+ * ne s'appuie sur aucun filet de sécurité automatique : la
+ * vérification manuelle en amont EST le filet de sécurité ici.
+ *
+ * Idempotent : sans effet si relancé -- une fiche déjà migrée a
+ * Type="Film", donc plus dans STATUTS_A_MIGRER_V1 au tour suivant.
+ */
+function migrerTypeVersStatutAccesV1_() {
+  const classeur = SpreadsheetApp.getActiveSpreadsheet();
+  const films = classeur.getSheetByName("Films");
+  if (!films) throw new Error("La feuille Films est introuvable.");
+
+  const entetes = films.getRange(1, 1, 1, films.getLastColumn()).getValues()[0]
+    .map(function(e) { return String(e || "").trim(); });
+
+  let colStatutAcces = entetes.indexOf("StatutAcces");
+  if (colStatutAcces === -1) {
+    colStatutAcces = films.getLastColumn();
+    films.getRange(1, colStatutAcces + 1).setValue("StatutAcces").setFontWeight("bold");
+    Logger.log("Colonne StatutAcces ajoutée (colonne " + (colStatutAcces + 1) + ").");
+    entetes.push("StatutAcces");
+  } else {
+    Logger.log("Colonne StatutAcces déjà présente (colonne " + (colStatutAcces + 1) + ").");
+  }
+
+  const colType = entetes.indexOf("Type");
+  const colId = entetes.indexOf("ID");
+  if (colType === -1) throw new Error("Colonne Type introuvable dans Films.");
+
+  const STATUTS_A_MIGRER_V1 = ["VOD", "Indispo", "Bientôt disponible"];
+  const donnees = films.getDataRange().getValues();
+  let migrees = 0;
+
+  for (let i = 1; i < donnees.length; i++) {
+    const typeActuel = String(donnees[i][colType] || "").trim();
+    if (STATUTS_A_MIGRER_V1.indexOf(typeActuel) === -1) continue;
+
+    const ligne = i + 1; // 1-indexé pour getRange (ligne 1 = en-tête)
+    films.getRange(ligne, colType + 1).setValue("Film");
+    films.getRange(ligne, colStatutAcces + 1).setValue(typeActuel);
+    migrees++;
+    Logger.log(
+      "  " + (colId !== -1 ? donnees[i][colId] : "ligne " + ligne) +
+      " : Type " + typeActuel + " -> Film, StatutAcces=" + typeActuel
+    );
+  }
+
+  Logger.log(migrees + " fiche(s) migrée(s) (Type restauré à Film, StatutAcces renseigné).");
+}
+
 
 
 
