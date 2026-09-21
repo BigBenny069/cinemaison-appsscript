@@ -3,7 +3,14 @@
  * CinéMaison V4
  * Script : 02_TMDB.gs
  * Rôle   : Recherche et enrichissement TMDb fiabilisés
- * Version: 4.6.2
+ * Version: 4.6.3
+ *
+ * Correctif V4.6.3 (19/09/2026) : ajout d'un garde-fou défensif
+ * (avertirSiTypeInattendu_, 01_UTILS.gs) avant les 2 choix d'endpoint
+ * movie/tv déduits de Type -- Phase D (Étape 3) du chantier "Séparer
+ * Catégorie et Statut dans Type". Ne change aucun comportement
+ * (endpoint par défaut inchangé), journalise juste si Type contenait
+ * un jour autre chose qu'une des 4 catégories attendues.
  *
  * Correctif V4.6.2 (11/09/2026) : nouvelle fonction
  * resoudreTmdbIdDepuisImdb_ (endpoint TMDb /find) -- permet de
@@ -120,6 +127,7 @@ function chercherTMDb_(titre, annee, type, realisateurActuel, tmdbIdManuel) {
 
 
 function rechercherTMDb_(titre, annee, type, apiKey) {
+  avertirSiTypeInattendu_(type, "rechercherTMDb_");
   const endpoint = type === "Série" ? "tv" : "movie";
 
 
@@ -219,6 +227,7 @@ function choisirMeilleurResultatTMDb_(titre, annee, resultats) {
  * remonter telle quelle.
  */
 function chargerDetailTMDbAvecRepli_(tmdbId, type, apiKey, commentaireMatching, scoreForce) {
+  avertirSiTypeInattendu_(type, "chargerDetailTMDbAvecRepli_");
   const endpointPrincipal = type === "Série" ? "tv" : "movie";
   const endpointAlterne = endpointPrincipal === "tv" ? "movie" : "tv";
 
