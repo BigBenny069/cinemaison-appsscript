@@ -7,7 +7,16 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.16
+ * Version: 2.17
+ *
+ * Correctif V2.17 (22/09/2026) : dejaTraiteRecemment_ (V2.15) hache
+ * désormais la signature (MD5) avant de l'utiliser comme clé de cache
+ * -- la clé brute (concaténation de tous les titres d'un lot de
+ * suggestions) dépassait la limite de 250 caractères de CacheService
+ * dès qu'il y avait une vingtaine de titres, faisant planter le
+ * garde-fou anti-doublon lui-même et bloquant totalement l'envoi du
+ * mail (constaté sur 27 suggestions Canal+, "Argument trop grand :
+ * key"). Comportement du garde-fou inchangé, juste la clé qui change.
  *
  * Correctif V2.16 (18/09/2026) : mail "RAS" (envoyerMailRasSuggestionsV1_)
  * quand une plateforme n'a ni suggestion ni ambiguïté à signaler --
@@ -642,7 +651,20 @@ function relancerVerificationEtMailDisney() {
  */
 function dejaTraiteRecemment_(cle) {
   const cache = CacheService.getScriptCache();
-  const cleCache = "webhook_dedup_" + cle;
+  // CORRECTIF (22/09/2026) -- CacheService refuse toute clé de plus de
+  // 250 caractères ("Argument too large: key") -- la signature d'un
+  // gros lot de suggestions (concaténation de tous les titres, voir
+  // les appelants) dépasse largement cette limite dès qu'il y a une
+  // vingtaine de titres avec des noms longs. Constaté le 22/09/2026 :
+  // 27 suggestions Canal+, mail jamais envoyé après 3 tentatives,
+  // toutes échouant avec la même exception -- le garde-fou censé
+  // éviter les doublons bloquait entièrement l'envoi du mail légitime.
+  // Un hash de longueur fixe (MD5, toujours 32 caractères hexadécimaux)
+  // remplace la clé brute -- clé courte garantie, quelle que soit la
+  // taille du lot.
+  const hashBrut = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, cle, Utilities.Charset.UTF_8);
+  const hash = hashBrut.map(function(o) { return (o < 0 ? o + 256 : o).toString(16).padStart(2, "0"); }).join("");
+  const cleCache = "webhook_dedup_" + hash;
   if (cache.get(cleCache)) return true;
   cache.put(cleCache, "1", 120); // 120s = 2 min
   return false;
