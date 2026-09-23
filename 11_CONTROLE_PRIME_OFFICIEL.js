@@ -3,8 +3,18 @@
  * CinéMaison V4
  * Script  : 11_CONTROLE_PRIME_OFFICIEL.gs
  * Rôle    : Diagnostic et import sécurisé des résultats Prime Video officiels
- * Version : 1.6 (19/09/2026)
+ * Version : 1.7 (23/09/2026)
  * ============================================================
+ *
+ * Correctif V1.7 (23/09/2026) : ajout du bloc ARRIVEE_DETECTEE,
+ * symétrique de DATE_DETECTEE mais pour une fiche BIENTOT_DISPONIBLE
+ * (compte à rebours avant disponibilité plutôt qu'avant retrait) --
+ * jusqu'ici, joursAvantDisponible était bien détecté par prime.js mais
+ * jamais transmis jusqu'ici, donc jamais aucune date affichée pour ces
+ * fiches (signalé par Ben, captures à l'appui : badge "BIENTÔT" sans
+ * aucun compte à rebours). Bloc entièrement à part, DATE_DETECTEE
+ * inchangé -- réutilise DateDisponibiliteAuto (même champ, sens
+ * différent selon StatutAcces) et les compteurs existants.
  *
  * Correctif V1.6 (19/09/2026) : remplace le mécanisme V1.2 ci-dessous
  * -- Phase D du chantier "Séparer Catégorie et Statut dans Type" (voir
@@ -330,7 +340,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
     const message = String(resultat[hResultats.MessagePrime] || "").trim();
 
 
-    if (statut !== "AUCUNE_ALERTE" && statut !== "DATE_DETECTEE") {
+    if (statut !== "AUCUNE_ALERTE" && statut !== "DATE_DETECTEE" && statut !== "ARRIVEE_DETECTEE") {
       Logger.log("IGNORÉ SANS EFFACEMENT | " + idFilm + " | statut=" + statut);
       ignores++;
       details.ignores.push(Object.assign(detailFiche_(film, idFilm), { raison: "statut=" + statut }));
@@ -417,6 +427,120 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
         if (plateformeAjoutee) {
           ecrireChampPrimeV110_(films, film.ligne, hFilms,
             "PlateformesDetectees", plateformesApres);
+        }
+        ecrireStatutAccesSiBesoin_();
+      }
+      continue;
+    }
+
+
+    // NOUVEAU (23/09/2026) -- symétrique du bloc DATE_DETECTEE plus bas,
+    // mais pour une fiche BIENTOT_DISPONIBLE (pas encore sortie) plutôt
+    // qu'une fiche sur le départ. Volontairement un bloc À PART entier
+    // (jamais mélangé au bloc DATE_DETECTEE existant, dont la regex/le
+    // wording sont spécifiques au départ) -- bloc DATE_DETECTEE
+    // entièrement inchangé. Réutilise DateDisponibiliteAuto (même
+    // champ que pour un départ -- sa vraie signification dépend de
+    // StatutAcces, géré côté App.jsx) et les compteurs existants
+    // (datesValidees/changements/conflitsProteges), pour ne rien
+    // ajouter au format du mail récapitulatif.
+    if (statut === "ARRIVEE_DETECTEE") {
+      const joursArrivee = Number(resultat[hResultats.JoursRestants]);
+      const correspondanceMessageArrivee = message.match(
+        /Disponible\s+sur\s+Prime\s+Video\s+dans\s+(\d+)\s+jours?/i
+      );
+      if (!correspondanceMessageArrivee || !isFinite(joursArrivee) || joursArrivee < 0 || joursArrivee > 60 ||
+          Number(correspondanceMessageArrivee[1]) !== joursArrivee) {
+        Logger.log("ERREUR VALIDATION ARRIVÉE | " + idFilm + " | message=" + message);
+        erreurs++;
+        details.erreurs.push(Object.assign(detailFiche_(film, idFilm), { raison: "message arrivée invalide" }));
+        continue;
+      }
+
+      const dateArrivee = convertirDateResultatPrimeV110_(
+        resultat[hResultats.DateRetraitDetectee]
+      );
+      if (!dateArrivee) {
+        Logger.log("ERREUR DATE ARRIVÉE | " + idFilm);
+        erreurs++;
+        details.erreurs.push(Object.assign(detailFiche_(film, idFilm), { raison: "date arrivée invalide" }));
+        continue;
+      }
+
+      const differenceArrivee = Math.round(
+        (dateArrivee.getTime() - jourControle.getTime()) / 86400000
+      );
+      if (Math.abs(differenceArrivee - joursArrivee) > 1) {
+        Logger.log(
+          "ERREUR COHÉRENCE ARRIVÉE | " + idFilm + " | jours=" + joursArrivee +
+          " | différence=" + differenceArrivee
+        );
+        erreurs++;
+        details.erreurs.push(Object.assign(detailFiche_(film, idFilm), { raison: "incohérence jours/date arrivée" }));
+        continue;
+      }
+
+      const ancienneDateArrivee = film.valeurs[hFilms.DateDisponibiliteAuto];
+      const ancienneSourceArrivee = String(
+        film.valeurs[hFilms.SourceDisponibiliteAuto] || ""
+      ).trim();
+      const autreSourceArriveeProtegee = !!ancienneDateArrivee && !!ancienneSourceArrivee &&
+        !estSourcePrimeV110_(ancienneSourceArrivee);
+
+      if (autreSourceArriveeProtegee) {
+        conflitsProteges++;
+        details.conflitsProteges.push(Object.assign(detailFiche_(film, idFilm), { raisonConflit: "source conservée : " + ancienneSourceArrivee }));
+        Logger.log(
+          "CONFLIT PROTÉGÉ ARRIVÉE | " + idFilm + " | ligne " + film.ligne +
+          " | source conservée=" + ancienneSourceArrivee
+        );
+        if (ecrire) {
+          ecrireChampPrimeV110_(films, film.ligne, hFilms,
+            "DernierControleDisponibilite", controleLe);
+          if (plateformeAjoutee) {
+            ecrireChampPrimeV110_(films, film.ligne, hFilms,
+              "PlateformesDetectees", plateformesApres);
+          }
+          ecrireStatutAccesSiBesoin_();
+        }
+        continue;
+      }
+
+      datesValidees++;
+      const dateArriveeChangee = !memeDatePrimeV110_(ancienneDateArrivee, dateArrivee);
+      if (dateArriveeChangee) changements++;
+      details.datesValidees.push(Object.assign(detailFiche_(film, idFilm), {
+        dateRetrait: formaterDatePrimeV110_(dateArrivee),
+        changee: dateArriveeChangee,
+      }));
+      Logger.log(
+        "DATE ARRIVÉE VALIDÉE | " + idFilm + " | ligne " + film.ligne + " | " +
+        formaterDatePrimeV110_(dateArrivee) +
+        (dateArriveeChangee ? " | changement" : " | identique")
+      );
+
+      if (ecrire) {
+        ecrireChampPrimeV110_(films, film.ligne, hFilms,
+          "DateDisponibiliteAuto", dateArrivee);
+        ecrireChampPrimeV110_(films, film.ligne, hFilms,
+          "SourceDisponibiliteAuto", PRIME_SOURCE_OFFICIELLE_V110);
+        ecrireChampPrimeV110_(films, film.ligne, hFilms,
+          "DernierControleDisponibilite", controleLe);
+        ecrireChampPrimeV110_(films, film.ligne, hFilms,
+          "StatutDisponibiliteAuto", "DATE_CONNUE");
+        ecrireChampPrimeV110_(films, film.ligne, hFilms,
+          "StatutDisponibilite", "DATE_CONNUE");
+        if (plateformeAjoutee) {
+          ecrireChampPrimeV110_(films, film.ligne, hFilms,
+            "PlateformesDetectees", plateformesApres);
+        }
+        ecrireChampPrimeV110_(films, film.ligne, hFilms,
+          "CommentaireDisponibilite",
+          "Prime Video officiel : " + message + " / Date calculée : " +
+          formaterDatePrimeV110_(dateArrivee));
+        if (dateArriveeChangee) {
+          ecrireChampPrimeV110_(films, film.ligne, hFilms,
+            "DernierChangementDisponibilite", maintenant);
         }
         ecrireStatutAccesSiBesoin_();
       }
