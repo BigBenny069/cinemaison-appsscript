@@ -13,7 +13,14 @@
  *             DERNIERES_SUGGESTIONS_PLATEFORMES (voir 09_WEBHOOK.gs),
  *             donc toujours la donnée du dernier scan de chaque
  *             plateforme, même si le scan remonte à plusieurs jours.
- * Version : 1.2
+ * Version : 1.3
+ *
+ * Correctif V1.3 (24/09/2026) : Partie 1 (À RETIRER) traite maintenant
+ * un scan présent mais SANS AUCUNE ligne de données (juste l'entête)
+ * comme "pas de scan" plutôt que "tout a disparu" -- ce cas précis
+ * (écriture Vercel interrompue entre le vidage et la réécriture de
+ * CONTROLE_<PLATEFORME>) faisait ressortir le catalogue entier d'une
+ * plateforme comme à retirer. Voir calculerEcartsRetraitV1_.
  *
  * Correctif V1.2 (11/09/2026) : vignettes (affiche 50x75) ajoutées sur
  * les 3 sections du mail -- Partie 1 depuis Films.Affiche, Partie 2 et
@@ -168,6 +175,27 @@ function calculerEcartsRetraitV1_(plateforme) {
     return [];
   }
   if (!resultats) return []; // pas de scan complet enregistré -- rien à comparer
+
+  // CORRECTIF (24/09/2026) -- un scan RÉUSSI mais dont l'écriture vers
+  // le Sheet a échoué EN COURS DE ROUTE (le Vercel de controle-prime.js
+  // vide la plage CONTROLE_<PLATEFORME> puis la réécrit -- deux appels
+  // séparés, pas une seule opération atomique) laisse la feuille avec
+  // juste l'entête, aucune ligne de données. lireResultatsPrimeV110_/
+  // lireResultatsStreamingV1_ renvoient alors un objet NON NULL
+  // (l'entête existe bien), donc le test juste au-dessus ne l'attrape
+  // pas -- idsScannes restait vide, et TOUT le catalogue de cette
+  // plateforme ressortait comme "disparu" (constaté le 24/09/2026 sur
+  // Ben : 290 fiches Prime signalées "à retirer" alors que le contrôle
+  // de la veille s'était bien passé). Un scan sans AUCUNE ligne de
+  // données n'est pas différent d'une absence de scan -- rien à
+  // comparer non plus, mêmes causes mêmes conséquences.
+  if (resultats.lignes.length <= 1) {
+    Logger.log(
+      "RAPPORT_ECARTS : " + feuilleControle + " a un entête mais aucune ligne de données -- " +
+      "traité comme \"pas de scan\" plutôt que \"tout a disparu\"."
+    );
+    return [];
+  }
 
   const idsScannes = {};
   const hR = resultats.index;
