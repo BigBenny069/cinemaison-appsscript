@@ -7,7 +7,16 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.17
+ * Version: 2.18
+ *
+ * Correctif V2.18 (24/09/2026) : nouvelle action
+ * "alerteTypeIncoherentStreaming" (Netflix/Prime/Disney+) -- mail de
+ * vérification pour une fiche déjà dans CinéMaison dont le Type
+ * (Film/Série) ne correspond pas à ce que la page affiche réellement
+ * (estSerie, détecté côté collecteur). Demandé par Ben après le cas
+ * "Ted Bundy : Autoportrait d'un tueur", mal étiqueté Film. Lien
+ * direct vers la fiche en mode édition dans le mail, aucune correction
+ * automatique.
  *
  * Correctif V2.17 (22/09/2026) : dejaTraiteRecemment_ (V2.15) hache
  * désormais la signature (MD5) avant de l'utiliser comme clé de cache
@@ -353,6 +362,10 @@ function doPost(e) {
 
     if (corps.action === "alerteStatutInconnuStreaming") {
       return traiterAlerteStatutInconnuStreamingV1_(corps);
+    }
+
+    if (corps.action === "alerteTypeIncoherentStreaming") {
+      return traiterAlerteTypeIncoherentStreamingV1_(corps);
     }
 
     if (corps.action === "alerteAnomalieScraping") {
@@ -993,6 +1006,74 @@ function traiterAlerteStatutInconnuStreamingV1_(corps) {
   journal_(
     "CONTROLE_" + plateforme,
     "STATUT_INCONNU",
+    destinataires ? "OK" : "IGNORE_SANS_DESTINATAIRE",
+    fiches.length + " fiche(s) : " + fiches.map(function(f) { return f.titre; }).join(", ")
+  );
+
+  return reponseJsonWebhook_({ ok: true, mailEnvoye: !!destinataires, nombreFiches: fiches.length });
+}
+
+/**
+ * Reçoit { secret, action: "alerteTypeIncoherentStreaming", plateforme,
+ * fiches: [{id, titre, url, typeActuel, typeDetecte}, ...] } -- fiches
+ * EXISTANTES dont le Type (Film/Série) enregistré dans CinéMaison ne
+ * correspond pas à ce que la page de la plateforme affiche réellement
+ * (estSerie, calculé côté collecteur depuis le contenu de la page --
+ * voir prime.js/netflix.js/disney.js). Demandé par Ben le 24/09/2026
+ * après le cas "Ted Bundy : Autoportrait d'un tueur", mal étiqueté
+ * Film avant le correctif de détection. Simple mail de vérification
+ * manuelle avec lien direct vers la fiche en mode édition -- rien
+ * n'est jamais corrigé automatiquement ici.
+ */
+function traiterAlerteTypeIncoherentStreamingV1_(corps) {
+  const plateforme = String(corps.plateforme || "").trim();
+  const fiches = Array.isArray(corps.fiches) ? corps.fiches : [];
+  if (fiches.length === 0) {
+    return reponseJsonWebhook_({ ok: false, error: "fiches vide" }, 400);
+  }
+
+  // Voir dejaTraiteRecemment_ plus haut.
+  const signature = "alerteTypeIncoherentStreaming_" + plateforme + "_" +
+    fiches.map(function(f) { return f.id; }).join("|");
+  if (dejaTraiteRecemment_(signature)) {
+    journal_(plateforme, "TYPE_INCOHERENT", "IGNORE_DOUBLON_RECENT", "Requête identique déjà traitée dans les 2 dernières minutes");
+    return reponseJsonWebhook_({ ok: true, mailEnvoye: false, doublonIgnore: true });
+  }
+
+  const destinataires = destinatairesPourService_("AjoutAutoPrime");
+  if (destinataires) {
+    const motDePasse = String(lireConfig_("AddFilmPassword", ""));
+    const baseUrl = "https://cinemaison-v2.vercel.app";
+    const lignes = fiches.map(function(f) {
+      const corrigerUrl = baseUrl + "/?film=" + encodeURIComponent(f.id || "") + "&edit=1";
+      return '<tr><td style="padding:8px 0;border-bottom:1px solid #EFE7D6;font-family:Arial,sans-serif;font-size:13px;color:#3A2E22">' +
+        '<a href="' + f.url + '" style="color:#B5622B;text-decoration:none"><strong>' + f.titre + '</strong></a><br>' +
+        '<span style="color:#9A9182">Actuellement : ' + f.typeActuel + ' &middot; Détecté sur la page : ' + f.typeDetecte + '</span><br>' +
+        '<a href="' + corrigerUrl + '" style="color:#B5622B">Corriger</a>' +
+        '</td></tr>';
+    }).join("");
+    const corpsHtml =
+      '<!DOCTYPE html><html><head><meta charset="UTF-8"></head>' +
+      '<body style="margin:0;padding:0;background:#F5EFE0"><div style="background:#F5EFE0;padding:24px 12px">' +
+      '<div style="background:#FFFBF2;border-radius:8px;padding:28px 22px;max-width:480px;margin:0 auto;font-family:Georgia,serif">' +
+      '<div style="font-size:22px;font-weight:bold;color:#3A2E22">CINÉ<span style="color:#B5622B">MAISON</span></div>' +
+      '<div style="font-size:11px;letter-spacing:1.5px;color:#B5622B;margin-top:4px;font-family:Arial,sans-serif">' +
+      plateforme + ' &middot; TYPE POSSIBLEMENT INCOHÉRENT</div>' +
+      '<div style="border-top:1px solid #E3D9C4;margin:16px 0"></div>' +
+      '<p style="font-size:13px;color:#9A9182;font-family:Arial,sans-serif">' +
+      fiches.length + ' fiche(s) déjà dans CinéMaison dont le Type ne correspond pas à ce que la page affiche -- à vérifier :</p>' +
+      '<table role="presentation" width="100%" style="border-collapse:collapse">' + lignes + '</table>' +
+      '</div></div></body></html>';
+    MailApp.sendEmail({
+      to: destinataires,
+      subject: "CinéMaison - V2 - " + plateforme + " : " + fiches.length + " Type possiblement incohérent",
+      htmlBody: corpsHtml,
+    });
+  }
+
+  journal_(
+    "CONTROLE_" + plateforme,
+    "TYPE_INCOHERENT",
     destinataires ? "OK" : "IGNORE_SANS_DESTINATAIRE",
     fiches.length + " fiche(s) : " + fiches.map(function(f) { return f.titre; }).join(", ")
   );
