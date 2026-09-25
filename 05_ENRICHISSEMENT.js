@@ -3058,5 +3058,7 @@ function reinitialiserBandesAnnoncesManquantesV1(limite) {
     pasEncoreEnrichies: ignoreesPasEncoreEnrichies
   };
 }
-
+function forcerFILM0583() {
+  return forcerReenrichissementFicheParCleV452_("FILM0583");
+}
 
