@@ -3045,5 +3045,18 @@ function reinitialiserBandesAnnoncesManquantesV1(limite) {
     pasEncoreEnrichies: ignoreesPasEncoreEnrichies
   };
 }
+// À COLLER dans l'éditeur Apps Script (n'importe quel fichier .gs du
+// projet, par exemple à la toute fin de 05_ENRICHISSEMENT.gs), puis
+// sélectionner "forcerFILM0583" dans le menu déroulant "Exécuter" en
+// haut, et lancer. Regarde ensuite le journal d'exécution (icône
+// horloge à gauche) pour voir le résultat détaillé -- y compris tout
+// message d'erreur si la résolution IMDb -> TMDb échoue réellement.
+//
+// Une fois le test fait, tu peux supprimer cette fonction (elle ne
+// sert qu'à ce diagnostic ponctuel).
+
+function forcerFILM0583() {
+  return forcerReenrichissementFicheParCleV452_("FILM0583");
+}
 
 
