@@ -3,7 +3,18 @@
  * CinéMaison V4
  * Script : 05_ENRICHISSEMENT.gs
  * Rôle   : Orchestration TMDb + Letterboxd
- * Version: 4.6.4
+ * Version: 4.6.5
+ *
+ * Correctif V4.6.5 (25/09/2026) : si le titre/année/type a changé
+ * depuis la dernière empreinte enregistrée mais que l'ID TMDb saisi
+ * n'a pas bougé, la recherche fraîche par titre pouvait échouer
+ * ("Aucun résultat TMDb fiable") sans jamais essayer l'ID pourtant
+ * bien renseigné sur la fiche -- l'ID était délibérément ignoré au
+ * profit d'une recherche par titre "à jour". Un repli sur l'ID
+ * existant est maintenant tenté si cette recherche fraîche échoue.
+ * Signalé par Ben sur plusieurs fiches (FILM0516, FILM0549, FILM0616,
+ * FILM0643, FILM0802 -- ID visiblement correct, TentativesEnrichissement
+ * à 0, jamais vraiment tenté avec cet ID).
  *
  * Correctif V4.6.4 (11/09/2026) : l'IMDbID saisi à la main (nouveau
  * champ éditable depuis l'app) peut maintenant aussi déclencher
@@ -1150,7 +1161,7 @@ function enrichirUneLigneV4_(
         ? tmdbId
         : "";
 
-    const tmdb =
+    let tmdb =
       chercherTMDb_(
         titre,
         annee,
@@ -1158,6 +1169,39 @@ function enrichirUneLigneV4_(
         realisateurActuel,
         tmdbIdRecherche
       );
+
+    // CORRECTIF (25/09/2026) -- si le titre/année/type a changé depuis
+    // la dernière empreinte enregistrée (identiteModifiee) MAIS que
+    // l'ID TMDb, lui, n'a pas bougé, le code ignorait DÉLIBÉRÉMENT cet
+    // ID pour repartir sur une recherche par titre "fraîche" -- avec
+    // le risque, si cette recherche échoue (titre ambigu, année
+    // absente, titre légèrement différent de TMDb...), de ne JAMAIS
+    // essayer l'ID pourtant bien renseigné sur la fiche. Signalé par
+    // Ben sur plusieurs fiches (ex. FILM0516, FILM0549, FILM0616,
+    // FILM0643, FILM0802) : ID visiblement correct, TentativesEnrichissement
+    // à 0 (jamais vraiment tenté), commentaire "Aucun résultat TMDb
+    // fiable" -- signature exacte de l'échec de recherche par titre,
+    // pas d'un ID invalide. On retente maintenant explicitement avec
+    // l'ID existant si la recherche fraîche n'a rien donné et qu'on
+    // avait un ID sous la main sans l'avoir utilisé.
+    if (
+      (!tmdb || !tmdb.valide) &&
+      !tmdbIdRecherche &&
+      tmdbId
+    ) {
+      const tmdbAvecIdExistant =
+        chercherTMDb_(
+          titre,
+          annee,
+          type,
+          realisateurActuel,
+          tmdbId
+        );
+
+      if (tmdbAvecIdExistant && tmdbAvecIdExistant.valide) {
+        tmdb = tmdbAvecIdExistant;
+      }
+    }
 
     if (
       tmdb &&
