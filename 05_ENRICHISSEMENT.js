@@ -3,7 +3,15 @@
  * CinéMaison V4
  * Script : 05_ENRICHISSEMENT.gs
  * Rôle   : Orchestration TMDb + Letterboxd
- * Version: 4.6.5
+ * Version: 4.6.6
+ *
+ * Correctif V4.6.6 (25/09/2026) : forcerReenrichissementFicheParCleV452_
+ * cherchait une fiche par ID sur la colonne "IDFilm", qui n'existe
+ * plus (la colonne s'appelle "ID" depuis un moment -- une autre
+ * fonction du même fichier, trouverFicheParIdentifiantV453_, gérait
+ * déjà les deux noms, mais ce correctif n'avait jamais été reporté
+ * ici). Résultat : "Aucune fiche trouvée" pour n'importe quel ID
+ * pourtant valide -- signalé par Ben en testant FILM0583.
  *
  * Correctif V4.6.5 (25/09/2026) : si le titre/année/type a changé
  * depuis la dernière empreinte enregistrée mais que l'ID TMDb saisi
@@ -1990,7 +1998,12 @@ function forcerReenrichissementFicheParCleV452_(recherche) {
     const correspondances = [];
 
     for (let i = 1; i < data.length; i++) {
-      const id = safeTrim_(get_(data[i], h, "IDFilm"));
+      // CORRECTIF (25/09/2026) -- cherchait uniquement "IDFilm", un nom
+      // de colonne qui n'existe plus (la colonne s'appelle "ID" --
+      // voir trouverFicheParIdentifiantV453_ plus bas, qui gère déjà
+      // correctement les deux). "Aucune fiche trouvée" pour un ID
+      // pourtant bien valide, signalé par Ben avec FILM0583.
+      const id = safeTrim_(get_(data[i], h, "ID") || get_(data[i], h, "IDFilm"));
       const titre = safeTrim_(get_(data[i], h, "Titre"));
       const urlLetterboxd = safeTrim_(get_(data[i], h, "URLLetterboxd"));
 
@@ -2048,7 +2061,7 @@ function forcerReenrichissementFicheParCleV452_(recherche) {
 
     Logger.log(
       "RÉENRICHISSEMENT TERMINÉ | " +
-      safeTrim_(get_(row, h, "IDFilm")) + " | " +
+      safeTrim_(get_(row, h, "ID") || get_(row, h, "IDFilm")) + " | " +
       safeTrim_(get_(row, h, "Titre")) + " | statut=" + statut
     );
 
@@ -3044,19 +3057,6 @@ function reinitialiserBandesAnnoncesManquantesV1(limite) {
     dejaPourvues: dejaOk,
     pasEncoreEnrichies: ignoreesPasEncoreEnrichies
   };
-}
-// À COLLER dans l'éditeur Apps Script (n'importe quel fichier .gs du
-// projet, par exemple à la toute fin de 05_ENRICHISSEMENT.gs), puis
-// sélectionner "forcerFILM0583" dans le menu déroulant "Exécuter" en
-// haut, et lancer. Regarde ensuite le journal d'exécution (icône
-// horloge à gauche) pour voir le résultat détaillé -- y compris tout
-// message d'erreur si la résolution IMDb -> TMDb échoue réellement.
-//
-// Une fois le test fait, tu peux supprimer cette fonction (elle ne
-// sert qu'à ce diagnostic ponctuel).
-
-function forcerFILM0583() {
-  return forcerReenrichissementFicheParCleV452_("FILM0583");
 }
 
 
