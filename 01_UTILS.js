@@ -3,8 +3,18 @@
  * CinéMaison V4
  * Script : 01_UTILS.gs
  * Rôle   : Utilitaires communs sécurisés
- * Version: 4.2.1
+ * Version: 4.2.2
  * ============================================================
+ *
+ * Correctif 4.2.2 (25/09/2026) : setProtected_/setIfChanged_/
+ * setIfBlank_ n'avaient aucune résilience face aux aléas transitoires
+ * de Google ("Service Spreadsheets timed out...") -- constaté par Ben
+ * pendant un contrôle Canal+ (script interrompu en pleine liste).
+ * Nouvelle fonction avecReessaiSheets_ (3 essais, pause courte) qui
+ * protège maintenant les lectures/écritures de cellule des 3
+ * fonctions -- un seul correctif ici profite à tout le projet
+ * (Canal+, enrichissement, Prime/Netflix/Disney+...), toutes passant
+ * par ces mêmes fonctions.
  *
  * Correctif 4.2.1 (19/09/2026) : ajout de avertirSiTypeInattendu_(),
  * garde-fou défensif Phase D (Étape 3) du chantier "Séparer Catégorie
@@ -60,7 +70,7 @@ function setIfChanged_(sheet, rowNumber, h, columnName, value) {
 
 
   const cell = sheet.getRange(rowNumber, h[columnName] + 1);
-  const oldValue = cell.getValue();
+  const oldValue = avecReessaiSheets_(() => cell.getValue());
 
 
   if (normaliserValeur_(oldValue) === normaliserValeur_(value)) {
@@ -68,7 +78,7 @@ function setIfChanged_(sheet, rowNumber, h, columnName, value) {
   }
 
 
-  cell.setValue(value);
+  avecReessaiSheets_(() => cell.setValue(value));
   return true;
 }
 
@@ -79,13 +89,13 @@ function setIfBlank_(sheet, rowNumber, h, columnName, value) {
 
 
   const cell = sheet.getRange(rowNumber, h[columnName] + 1);
-  const oldValue = cell.getValue();
+  const oldValue = avecReessaiSheets_(() => cell.getValue());
 
 
   if (!isBlank_(oldValue)) return false;
 
 
-  cell.setValue(value);
+  avecReessaiSheets_(() => cell.setValue(value));
   return true;
 }
 
@@ -115,6 +125,46 @@ function writeIfBlankOrRevision_(sheet, rowNumber, h, columnName, value, modeRev
  */
 
 
+/**
+ * NOUVEAU (25/09/2026) -- réessai automatique pour les appels
+ * SpreadsheetApp sujets à un aléa d'infrastructure Google ("Service
+ * Spreadsheets timed out...") -- constaté par Ben sur setProtected_
+ * pendant un contrôle Canal+, mais cette fonction est appelée partout
+ * dans le projet (Canal+, enrichissement, contrôles Prime/Netflix/
+ * Disney+...), donc un seul correctif ici profite à tout le monde.
+ * Aucune tentative existante avant ce correctif. 3 essais, pause
+ * courte entre chacun -- ne réessaie QUE les erreurs contenant
+ * "timed out"/"timeout"/"service" (aléa transitoire connu), laisse
+ * remonter immédiatement toute autre erreur (pas la peine d'attendre
+ * pour une vraie erreur de logique).
+ */
+function avecReessaiSheets_(fonction, tentatives) {
+  tentatives = tentatives || 3;
+  let derniereErreur = null;
+
+  for (let essai = 1; essai <= tentatives; essai++) {
+    try {
+      return fonction();
+    } catch (e) {
+      derniereErreur = e;
+      const message = String((e && e.message) || e).toLowerCase();
+      const estTransitoire =
+        message.indexOf("timed out") !== -1 ||
+        message.indexOf("timeout") !== -1 ||
+        message.indexOf("service spreadsheets") !== -1;
+
+      if (!estTransitoire || essai === tentatives) {
+        throw e;
+      }
+
+      Utilities.sleep(1000 * essai);
+    }
+  }
+
+  throw derniereErreur;
+}
+
+
 function setProtected_(sheet, rowNumber, h, columnName, value, options) {
   options = options || {};
 
@@ -131,7 +181,7 @@ function setProtected_(sheet, rowNumber, h, columnName, value, options) {
 
 
   const cell = sheet.getRange(rowNumber, h[columnName] + 1);
-  const oldValue = cell.getValue();
+  const oldValue = avecReessaiSheets_(() => cell.getValue());
 
 
   if (
@@ -162,7 +212,7 @@ function setProtected_(sheet, rowNumber, h, columnName, value, options) {
   }
 
 
-  cell.setValue(value);
+  avecReessaiSheets_(() => cell.setValue(value));
   return true;
 }
 
