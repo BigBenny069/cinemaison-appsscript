@@ -1045,7 +1045,17 @@ function traiterAlerteTypeIncoherentStreamingV1_(corps) {
     const motDePasse = String(lireConfig_("AddFilmPassword", ""));
     const baseUrl = "https://cinemaison-v2.vercel.app";
     const lignes = fiches.map(function(f) {
-      const corrigerUrl = baseUrl + "/?film=" + encodeURIComponent(f.id || "") + "&edit=1";
+      // CORRECTIF (26/09/2026) -- l'ancien lien (baseUrl + "/?film=..&edit=1")
+      // n'a jamais fonctionné : l'app ne lit aucun paramètre d'URL de
+      // ce genre, le clic ouvrait juste l'accueil (signalé par Ben).
+      // Remplacé par le même mécanisme que "VALIDER ET APPLIQUER" /
+      // "C'est la bonne URL" -- clic direct, sans repasser par l'app
+      // (voir api/confirm.js, page=confirmType).
+      const corrigerUrl = baseUrl + "/api/confirm?page=confirmType" +
+        "&id=" + encodeURIComponent(f.id || "") +
+        "&titre=" + encodeURIComponent(f.titre || "") +
+        "&typeDetecte=" + encodeURIComponent(f.typeDetecte || "") +
+        "&pw=" + encodeURIComponent(motDePasse);
       return '<tr><td style="padding:8px 0;border-bottom:1px solid #EFE7D6;font-family:Arial,sans-serif;font-size:13px;color:#3A2E22">' +
         '<a href="' + f.url + '" style="color:#B5622B;text-decoration:none"><strong>' + f.titre + '</strong></a><br>' +
         '<span style="color:#9A9182">Actuellement : ' + f.typeActuel + ' &middot; Détecté sur la page : ' + f.typeDetecte + '</span><br>' +
