@@ -7,7 +7,24 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.18
+ * Version: 2.20
+ *
+ * Correctif V2.20 (27/09/2026) : second lien "C'est déjà le bon Type"
+ * ajouté à côté de "Corriger" dans le mail "Type possiblement
+ * incohérent" -- pour le cas inverse où c'est la détection qui se
+ * trompe, pas la fiche (ex. "Surveillant!"/"Nine Perfect Strangers",
+ * confirmées séries à la main par Ben). Pose TypeConfirme=true sans
+ * toucher au champ Type (voir api/confirm.js, page=confirmerTypeActuel,
+ * et get-films.js/update-film.js pour le nouveau champ) -- les
+ * collecteurs sautent alors cette fiche dans les comparaisons futures
+ * au lieu de re-signaler le même faux positif à chaque run.
+ *
+ * Correctif V2.19 (26/09/2026) : le lien "Corriger" du mail "Type
+ * possiblement incohérent" pointait vers baseUrl + "/?film=..&edit=1",
+ * qui n'a jamais fonctionné -- l'app ne lit aucun paramètre d'URL de
+ * ce genre, le clic ouvrait juste l'accueil (signalé par Ben). Remplacé
+ * par le même mécanisme que "VALIDER ET APPLIQUER" -- clic direct, sans
+ * repasser par l'app (voir api/confirm.js, page=confirmType).
  *
  * Correctif V2.18 (24/09/2026) : nouvelle action
  * "alerteTypeIncoherentStreaming" (Netflix/Prime/Disney+) -- mail de
@@ -1056,10 +1073,21 @@ function traiterAlerteTypeIncoherentStreamingV1_(corps) {
         "&titre=" + encodeURIComponent(f.titre || "") +
         "&typeDetecte=" + encodeURIComponent(f.typeDetecte || "") +
         "&pw=" + encodeURIComponent(motDePasse);
+      // NOUVEAU (27/09/2026) -- second lien pour le cas inverse : la
+      // détection se trompe, pas la fiche (ex. "Surveillant!"/"Nine
+      // Perfect Strangers", confirmées séries à la main par Ben).
+      // Pose TypeConfirme=true sans toucher au champ Type -- la fiche
+      // ne sera plus signalée par les prochains contrôles.
+      const confirmerUrl = baseUrl + "/api/confirm?page=confirmerTypeActuel" +
+        "&id=" + encodeURIComponent(f.id || "") +
+        "&titre=" + encodeURIComponent(f.titre || "") +
+        "&typeActuel=" + encodeURIComponent(f.typeActuel || "") +
+        "&pw=" + encodeURIComponent(motDePasse);
       return '<tr><td style="padding:8px 0;border-bottom:1px solid #EFE7D6;font-family:Arial,sans-serif;font-size:13px;color:#3A2E22">' +
         '<a href="' + f.url + '" style="color:#B5622B;text-decoration:none"><strong>' + f.titre + '</strong></a><br>' +
         '<span style="color:#9A9182">Actuellement : ' + f.typeActuel + ' &middot; Détecté sur la page : ' + f.typeDetecte + '</span><br>' +
-        '<a href="' + corrigerUrl + '" style="color:#B5622B">Corriger</a>' +
+        '<a href="' + corrigerUrl + '" style="color:#B5622B">Corriger</a> &middot; ' +
+        '<a href="' + confirmerUrl + '" style="color:#9A9182">C\'est déjà le bon Type</a>' +
         '</td></tr>';
     }).join("");
     const corpsHtml =
