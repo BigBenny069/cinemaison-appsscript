@@ -10,8 +10,19 @@
  *             - PLATEFORMES DIFFÉRENTES : normal et voulu (le même film
  *               peut légitimement être suivi sur CANAL+ ET Prime en même
  *               temps) -- pour information seulement, rien à corriger.
- * Version : 1.5 (08/09/2026)
+ * Version : 1.6 (26/09/2026)
  * ============================================================
+ *
+ * Correctif V1.6 : ajout d'un mail hebdomadaire (lundi 7h) reprenant
+ * la même détection "même plateforme" que l'onglet DIAGNOSTIC_DOUBLONS,
+ * avec un lien "Supprimer celle-ci" par fiche -- demandé par Ben après
+ * avoir découvert "Planète interdite" en double sur Prime (même durée),
+ * resté invisible des mois faute de lancer detecterDoublonsFilmsV1()
+ * manuellement. Logique de regroupement extraite dans
+ * calculerDoublonsFilmsV1_ (partagée entre l'ancien onglet et le
+ * nouveau mail plutôt que dupliquée) -- detecterDoublonsFilmsV1() et
+ * l'onglet DIAGNOSTIC_DOUBLONS n'ont pas changé de comportement.
+ * Mise en place du mail (une seule fois) : installerDeclencheurDoublonsHebdoV1().
  *
  * Correctif V1.5 : le timeout persistait même sur un rapport minuscule
  * (113 lignes, V1.4) -- écarte l'hypothèse "trop de données". Nouvelle
@@ -47,6 +58,9 @@
  * Résultat écrit dans l'onglet DIAGNOSTIC_DOUBLONS (créé une seule
  * fois, puis vidé et réécrit à chaque lancement suivant), PAS dans
  * Films -- purement un rapport de lecture, ne modifie jamais Films.
+ * Mail hebdomadaire (même détection, "même plateforme" seulement) :
+ * lance installerDeclencheurDoublonsHebdoV1() une seule fois pour
+ * l'activer -- voir genererEtEnvoyerRapportDoublonsV1 plus bas.
  */
 
 /** Réessaie jusqu'à 3 fois (pause 5s, 15s, 30s) si fonction() lève une exception. */
@@ -71,7 +85,10 @@ function avecNouvellesTentativesDoublonsV1_(fonction, description) {
   throw derniereErreur;
 }
 
-function detecterDoublonsFilmsV1() {
+// REFACTORISÉ (26/09/2026) -- logique de regroupement extraite dans
+// calculerDoublonsFilmsV1_ (partagée avec le nouveau mail hebdomadaire,
+// voir genererEtEnvoyerRapportDoublonsV1) plutôt que dupliquée.
+function calculerDoublonsFilmsV1_() {
   const classeur = SpreadsheetApp.getActiveSpreadsheet();
   const films = classeur.getSheetByName("Films");
   if (!films) throw new Error("La feuille Films est introuvable.");
@@ -87,6 +104,7 @@ function detecterDoublonsFilmsV1() {
   const colTitre = entetes.indexOf("Titre");
   const colAnnee = entetes.indexOf("Annee");
   const colPlateforme = entetes.indexOf("Plateforme");
+  const colAffiche = entetes.indexOf("Affiche");
   if (colID === -1 || colTitre === -1 || colAnnee === -1 || colPlateforme === -1) {
     throw new Error("Colonne ID, Titre, Annee ou Plateforme introuvable dans Films.");
   }
@@ -106,6 +124,7 @@ function detecterDoublonsFilmsV1() {
       titre: titre,
       annee: annee,
       plateforme: String(donnees[i][colPlateforme] || "").trim(),
+      affiche: colAffiche !== -1 ? String(donnees[i][colAffiche] || "") : "",
     });
   }
 
@@ -125,6 +144,13 @@ function detecterDoublonsFilmsV1() {
     }
   });
 
+  return { memePlateforme: memePlateforme, plateformesDifferentes: plateformesDifferentes };
+}
+
+function detecterDoublonsFilmsV1() {
+  const classeur = SpreadsheetApp.getActiveSpreadsheet();
+  const { memePlateforme, plateformesDifferentes } = calculerDoublonsFilmsV1_();
+
   avecNouvellesTentativesDoublonsV1_(
     function() { ecrireRapportDoublonsV1_(classeur, memePlateforme, plateformesDifferentes); },
     "écriture DIAGNOSTIC_DOUBLONS"
@@ -136,6 +162,103 @@ function detecterDoublonsFilmsV1() {
     plateformesDifferentes.length + " groupe(s)."
   );
   Logger.log("Détail écrit dans l'onglet DIAGNOSTIC_DOUBLONS.");
+}
+
+/**
+ * NOUVEAU (26/09/2026) -- version mail du diagnostic ci-dessus, sur
+ * demande de Ben (le film "Planète interdite" en double sur Prime,
+ * même durée, a fait choisir la mauvaise fiche en silence des mois
+ * durant avant d'être repéré). Hebdomadaire plutôt que quotidien : un
+ * doublon nouveau est rare, pas la peine d'un mail chaque jour.
+ * Ne touche PAS à detecterDoublonsFilmsV1 ni à l'onglet
+ * DIAGNOSTIC_DOUBLONS -- les deux mécanismes coexistent, chacun peut
+ * être lancé indépendamment.
+ * Installer le déclencheur une seule fois : installerDeclencheurDoublonsHebdoV1().
+ */
+function genererEtEnvoyerRapportDoublonsV1() {
+  const { memePlateforme } = calculerDoublonsFilmsV1_();
+
+  if (memePlateforme.length === 0) {
+    journal_("DIAGNOSTIC_DOUBLONS", "HEBDOMADAIRE", "OK", "Aucun doublon même plateforme.");
+    return;
+  }
+
+  const destinataires = destinatairesPourService_("AjoutAutoPrime");
+  if (destinataires) {
+    const html = construireHtmlRapportDoublonsV1_(memePlateforme);
+    MailApp.sendEmail({
+      to: destinataires,
+      subject: "CinéMaison - V2 - " + memePlateforme.length + " doublon(s) même plateforme",
+      htmlBody: html,
+    });
+  }
+
+  journal_(
+    "DIAGNOSTIC_DOUBLONS", "HEBDOMADAIRE", destinataires ? "OK" : "IGNORE_SANS_DESTINATAIRE",
+    memePlateforme.length + " groupe(s) trouvé(s)."
+  );
+}
+
+function construireHtmlRapportDoublonsV1_(memePlateforme) {
+  const motDePasse = String(lireConfig_("AddFilmPassword", ""));
+  const baseUrl = "https://cinemaison-v2.vercel.app";
+
+  function vignetteHtml(urlAffiche) {
+    return urlAffiche
+      ? '<img src="' + urlAffiche + '" width="50" height="75" style="border-radius:4px;object-fit:cover;flex-shrink:0;margin-right:12px" alt="">'
+      : '<div style="width:50px;height:75px;border-radius:4px;background:#E3D9C4;flex-shrink:0;margin-right:12px"></div>';
+  }
+
+  const groupesHtml = memePlateforme.map(function(membres) {
+    const lignesMembres = membres.map(function(m) {
+      const supprimerUrl = baseUrl + "/api/confirm?page=remove&id=" + encodeURIComponent(m.id) +
+        "&titre=" + encodeURIComponent(m.titre) + "&pw=" + encodeURIComponent(motDePasse);
+      return '<div style="display:flex;align-items:flex-start;padding:8px 0;border-bottom:1px solid #EFE7D6">' +
+        vignetteHtml(m.affiche) +
+        '<div style="font-size:13px;color:#3A2E22;font-family:Arial,sans-serif">' +
+        m.titre + ' (' + m.annee + ') &middot; ' + m.plateforme + ' &middot; ' + m.id +
+        '<br><a href="' + supprimerUrl + '" style="color:#B5622B">Supprimer celle-ci</a>' +
+        '</div></div>';
+    }).join("");
+    return '<div style="margin-top:16px">' + lignesMembres + '</div>';
+  }).join("");
+
+  return (
+    '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+    '<meta name="color-scheme" content="light only">' +
+    '<meta name="supported-color-schemes" content="light only">' +
+    '</head><body style="margin:0;padding:0;background:#F5EFE0">' +
+    '<div style="background:#F5EFE0;padding:24px 12px">' +
+    '<div style="background:#FFFBF2;border-radius:8px;padding:28px 22px;' +
+    'max-width:520px;margin:0 auto;font-family:Georgia,serif">' +
+    '<div style="font-size:22px;font-weight:bold;color:#3A2E22">' +
+    'CINÉ<span style="color:#B5622B">MAISON</span></div>' +
+    '<div style="font-size:11px;letter-spacing:1.5px;color:#B5622B;' +
+    'margin-top:4px;font-family:Arial,sans-serif">DOUBLONS &middot; RAPPORT HEBDOMADAIRE</div>' +
+    '<div style="font-size:13px;color:#9A9182;margin-top:10px;font-family:Arial,sans-serif">' +
+    memePlateforme.length + ' fiche(s) partageant Titre+Année ET Plateforme -- probablement des doublons. ' +
+    'Choisis laquelle garder, supprime l\'autre.</div>' +
+    '<div style="border-top:1px solid #E3D9C4;margin:16px 0"></div>' +
+    groupesHtml +
+    '</div></div></body></html>'
+  );
+}
+
+/** Lance une seule fois depuis l'éditeur pour activer le mail hebdomadaire. */
+function installerDeclencheurDoublonsHebdoV1() {
+  ScriptApp.getProjectTriggers()
+    .filter(function (t) { return t.getHandlerFunction() === "genererEtEnvoyerRapportDoublonsV1"; })
+    .forEach(function (t) { ScriptApp.deleteTrigger(t); });
+
+  // Lundi 7h -- avant le rapport d'écarts quotidien (8h), sans raison
+  // particulière : dis-moi si tu préfères un autre jour/heure.
+  ScriptApp.newTrigger("genererEtEnvoyerRapportDoublonsV1")
+    .timeBased()
+    .onWeekDay(ScriptApp.WeekDay.MONDAY)
+    .atHour(7)
+    .create();
+
+  Logger.log("Déclencheur hebdomadaire (lundi 7h) installé pour genererEtEnvoyerRapportDoublonsV1.");
 }
 
 function normaliserTitreDoublonsV1_(titre) {
