@@ -10,8 +10,31 @@
  *             - PLATEFORMES DIFFÉRENTES : normal et voulu (le même film
  *               peut légitimement être suivi sur CANAL+ ET Prime en même
  *               temps) -- pour information seulement, rien à corriger.
- * Version : 1.6 (26/09/2026)
+ * Version : 1.8 (27/09/2026)
  * ============================================================
+ *
+ * Correctif V1.8 : le regroupement par plateforme comparait le texte
+ * BRUT de la colonne Plateforme -- "CANAL+"/"Canal+",
+ * "NETFLIX"/"Netflix", "PRIME VIDEO"/"Prime Video" et surtout
+ * "DISNEY+"/"Disney+"/"DISNEY" (3 variantes constatées dans Films)
+ * n'étaient donc jamais reconnus comme la même plateforme, ratant des
+ * doublons du même genre que V1.7. Nouvelle fonction
+ * canoniserPlateformeDoublonsV1_ (même principe que
+ * normaliserStreamingV1_ de 17_CONTROLE_STREAMING_GENERIQUE.gs)
+ * utilisée pour le regroupement -- le texte affiché dans le
+ * rapport/mail reste toujours celui écrit dans Films, inchangé.
+ * Signalé par Ben en remarquant "Disney+" et "DISNEY" dans sa colonne
+ * Plateforme.
+ *
+ * Correctif V1.7 : un groupe Titre+Année avec 3+ plateformes dont
+ * DEUX identiques (ex. "Planète interdite" 1956 : 2 fiches PRIME VIDEO
+ * + 1 fiche CANAL+) n'était jamais signalé -- l'ancienne logique
+ * exigeait que TOUT le groupe soit sur une seule plateforme pour le
+ * classer "même plateforme", ratant le vrai doublon Prime caché dans
+ * ce groupe mixte. Détection maintenant faite PAR PLATEFORME à
+ * l'intérieur de chaque groupe, plutôt que sur le groupe entier.
+ * Signalé par Ben : "Planète interdite" toujours en double après un
+ * rapport annonçant 0 doublon.
  *
  * Correctif V1.6 : ajout d'un mail hebdomadaire (lundi 7h) reprenant
  * la même détection "même plateforme" que l'onglet DIAGNOSTIC_DOUBLONS,
@@ -135,11 +158,41 @@ function calculerDoublonsFilmsV1_() {
     const membres = groupes[cle];
     if (membres.length < 2) return;
 
-    const plateformesUniques = Array.from(new Set(membres.map(function(m) { return m.plateforme; })));
+    // CORRECTIF (27/09/2026) -- exigeait que TOUT le groupe soit sur
+    // une seule plateforme pour le signaler "même plateforme" -- rate
+    // un vrai doublon caché dans un groupe MIXTE (ex. "Planète
+    // interdite" 1956 : 2 fiches PRIME VIDEO + 1 fiche CANAL+, un vrai
+    // doublon sur Prime, mais classé "normal" à tort puisque le groupe
+    // entier compte 2 plateformes différentes). Repère maintenant les
+    // doublons PAR PLATEFORME à l'intérieur du groupe, plutôt que sur
+    // le groupe entier -- signalé par Ben (27/09/2026), qui n'avait
+    // pourtant encore rien supprimé quand le rapport a annoncé 0
+    // doublon même plateforme.
+    const parPlateforme = {};
+    membres.forEach(function(m) {
+      // CORRECTIF (27/09/2026) -- regroupait par texte brut de
+      // Plateforme, donc "CANAL+"/"Canal+", "NETFLIX"/"Netflix",
+      // "PRIME VIDEO"/"Prime Video" et surtout "DISNEY+"/"Disney+"/
+      // "DISNEY" (3 variantes constatées dans Films) n'étaient JAMAIS
+      // regroupés comme la même plateforme, ratant des doublons du
+      // même genre que le correctif ci-dessus vient de corriger.
+      // Signalé par Ben en repérant ces variantes. Normalise pour le
+      // regroupement (canoniserPlateformeDoublonsV1_), mais le texte
+      // affiché dans le rapport/mail reste celui écrit dans Films
+      // (m.plateforme, jamais modifié).
+      const cle2 = canoniserPlateformeDoublonsV1_(m.plateforme);
+      if (!parPlateforme[cle2]) parPlateforme[cle2] = [];
+      parPlateforme[cle2].push(m);
+    });
 
-    if (plateformesUniques.length === 1) {
-      memePlateforme.push(membres);
-    } else {
+    Object.keys(parPlateforme).forEach(function(plateforme) {
+      if (parPlateforme[plateforme].length >= 2) {
+        memePlateforme.push(parPlateforme[plateforme]);
+      }
+    });
+
+    const plateformesUniques = Object.keys(parPlateforme);
+    if (plateformesUniques.length > 1) {
       plateformesDifferentes.push(membres);
     }
   });
@@ -259,6 +312,30 @@ function installerDeclencheurDoublonsHebdoV1() {
     .create();
 
   Logger.log("Déclencheur hebdomadaire (lundi 7h) installé pour genererEtEnvoyerRapportDoublonsV1.");
+}
+
+/**
+ * NOUVEAU (27/09/2026) -- même principe que normaliserStreamingV1_
+ * (17_CONTROLE_STREAMING_GENERIQUE.gs) et PLATEFORMES_STREAMING_V1
+ * (motifs: ["DISNEY"] y reconnaît déjà "DISNEY"/"DISNEY+"/"Disney+"
+ * comme une seule plateforme) -- reproduit ici en local pour ne pas
+ * dépendre de l'ordre de chargement des fichiers, et couvre en plus
+ * CANAL+/PRIME VIDEO (absents de PLATEFORMES_STREAMING_V1, gérés par
+ * d'autres fonctions ailleurs dans le projet). Uniquement pour le
+ * REGROUPEMENT -- le texte affiché dans le rapport reste toujours
+ * m.plateforme tel qu'écrit dans Films.
+ */
+function canoniserPlateformeDoublonsV1_(valeur) {
+  const normalise = String(valeur || "")
+    .trim()
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (normalise.indexOf("DISNEY") >= 0) return "DISNEY+";
+  if (normalise.indexOf("NETFLIX") >= 0) return "NETFLIX";
+  if (normalise.indexOf("CANAL") >= 0) return "CANAL+";
+  if (normalise.indexOf("PRIME") >= 0) return "PRIME VIDEO";
+  return normalise;
 }
 
 function normaliserTitreDoublonsV1_(titre) {
