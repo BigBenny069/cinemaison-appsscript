@@ -3,10 +3,21 @@
  * CinéMaison V4
  * Script : 06_CONNECTEURS_PLATEFORMES.gs
  * Rôle   : Connecteurs plateformes — CANAL+ uniquement
- * Version: 4.7.7
+ * Version: 4.7.8
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs,
  *               Worker Cloudflare CANAL+ V3.5
  * ============================================================
+ *
+ * Correctif V4.7.8 (27/09/2026) : budget de temps (4,5 min) pour un
+ * lot du contrôle complet Canal+ -- "Exceeded maximum execution time"
+ * reçu par mail le 27/09 (démarré 6h44, tué à 6h50 pile). Le lot de
+ * 100 films n'avait aucune garde d'horloge et l'état de reprise n'est
+ * sauvegardé qu'à la fin du lot, donc un lot tué perdait toute sa
+ * progression. traiterIndicesCanalV41_ s'arrête maintenant avant la
+ * limite (mode COMPLET uniquement) et continuerControleCompletCanalV4
+ * avance prochainIndex jusqu'à la dernière fiche réellement traitée --
+ * le prochain déclenchement reprend juste après. Nouvelle ligne de
+ * journal INTERROMPU_BUDGET quand ça arrive.
  *
  * Correctif V4.7.7 (05/09/2026) :
  * - Les deux mails (modifications de dates + alerte technique) passent
@@ -300,6 +311,20 @@ function continuerControleCompletCanalV4() {
 
 
     ecrireConfig_("CanalDernierLotNbFilms", resultat.stats.traites);
+
+    // Lot interrompu par le budget de temps : on reprend juste après la
+    // dernière fiche réellement traitée, et la fin du parcours n'est
+    // évidemment pas atteinte.
+    if (resultat.interrompu && resultat.dernierIndexTraite !== null) {
+      selection.prochainIndex = resultat.dernierIndexTraite + 1;
+      selection.finAtteinte = false;
+      journal_(
+        "CONNECTEURS",
+        "CANAL_COMPLET_LOT",
+        "INTERROMPU_BUDGET",
+        "Budget de temps atteint -- reprise à l'index " + selection.prochainIndex
+      );
+    }
 
 
     etat.lots = Number(etat.lots || 0) + 1;
@@ -721,12 +746,33 @@ function dateVersTimestampCanalV41_(valeur) {
  * TRAITEMENT D'UN LOT
  * ============================================================
  */
+// CORRECTIF (27/09/2026) -- budget de temps pour un lot : Apps Script
+// coupe toute exécution à 6 min ("Exceeded maximum execution time",
+// mail d'échec reçu par Ben le 27/09 à 6h50 : contrôle démarré 6h44,
+// tué à 6h50 pile). Le lot (100 films par défaut, ~3-4 s chacun avec
+// Cloudflare + écritures Sheet) n'avait aucune garde d'horloge, et
+// l'état de reprise n'est sauvegardé qu'à la FIN du lot : un jour de
+// Sheets lent, le lot était tué et toute sa progression perdue, à
+// recommencer à l'identique. On s'arrête maintenant proprement avant
+// la limite ; l'appelant avance prochainIndex jusqu'à la dernière
+// fiche réellement traitée, et le prochain déclenchement reprend là.
+const BUDGET_LOT_CANAL_MS_V41 = 4.5 * 60 * 1000;
+
 function traiterIndicesCanalV41_(sheet, data, h, indices, mode) {
   const stats = creerStatsCanalV41_();
   const modifications = [];
+  const debutLot = Date.now();
+  let interrompu = false;
+  let dernierIndexTraite = null;
 
 
   indices.forEach(function(index) {
+    if (interrompu) return;
+    if (mode === "COMPLET" && Date.now() - debutLot > BUDGET_LOT_CANAL_MS_V41) {
+      interrompu = true;
+      return;
+    }
+    dernierIndexTraite = index;
     const rowNumber = index + 1;
     const row = data[index];
     const titre = cleanTitle_(get_(row, h, "Titre"));
@@ -802,7 +848,9 @@ function traiterIndicesCanalV41_(sheet, data, h, indices, mode) {
 
   return {
     stats: stats,
-    modifications: modifications
+    modifications: modifications,
+    interrompu: interrompu,
+    dernierIndexTraite: dernierIndexTraite
   };
 }
 
