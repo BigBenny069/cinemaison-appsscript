@@ -7,7 +7,14 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.20
+ * Version: 2.21
+ *
+ * Correctif V2.21 (29/09/2026) : deux nouvelles actions doPost pour
+ * des boutons dans Réglages (app React) -- "lancerControleDoublons"
+ * (relance detecterDoublonsFilmsV1 + son mail, sans attendre le
+ * déclencheur hebdomadaire) et "renvoyerRapportEcarts" (renvoie le
+ * mail "Écarts plateformes" à la demande). Voir
+ * api/lancer-rapport-admin.js côté Vercel.
  *
  * Correctif V2.20 (27/09/2026) : second lien "C'est déjà le bon Type"
  * ajouté à côté de "Corriger" dans le mail "Type possiblement
@@ -353,6 +360,22 @@ function doPost(e) {
       return traiterMiseAJourReglagesDigestV1_(corps);
     }
 
+    // NOUVEAU (29/09/2026) -- deux boutons dans Réglages (app React) :
+    // relancer le contrôle doublons + son mail hebdomadaire à la
+    // demande, et renvoyer le mail "Écarts plateformes" sans attendre
+    // le déclencheur quotidien de 8h. Appelés via api/lancer-rapport-admin.js
+    // (Vercel). genererEtEnvoyerRapportDoublonsV1 vit dans
+    // 16_DIAGNOSTIC_DOUBLONS.gs, genererEtEnvoyerRapportEcartsV1 dans
+    // 18_RAPPORT_ECARTS_PLATEFORMES.gs -- appelables ici tel quel, même
+    // projet Apps Script, même espace de noms global.
+    if (corps.action === "lancerControleDoublons") {
+      return traiterLancerControleDoublonsV1_(corps);
+    }
+
+    if (corps.action === "renvoyerRapportEcarts") {
+      return traiterRenvoyerRapportEcartsV1_(corps);
+    }
+
     if (corps.action === "alerteSuggestionsPrime") {
       return traiterAlerteSuggestionsPrimeV1_(corps);
     }
@@ -573,6 +596,31 @@ function construirePageDetailControleV1_(plateforme) {
  * jamais d'écriture directe de cellule depuis Vercel, pour ne dépendre
  * que de la logique déjà fiable côté Apps Script.
  */
+/**
+ * NOUVEAU (29/09/2026) -- boutons Réglages "Lancer contrôle doublons"
+ * et "Renvoyer le mail écarts plateformes" (app React, voir
+ * api/lancer-rapport-admin.js). Chacune appelle directement la
+ * fonction existante -- aucune nouvelle logique de détection, juste
+ * un déclenchement à la demande en plus du déclencheur automatique.
+ */
+function traiterLancerControleDoublonsV1_(corps) {
+  try {
+    genererEtEnvoyerRapportDoublonsV1();
+    return reponseJsonWebhook_({ ok: true });
+  } catch (err) {
+    return reponseJsonWebhook_({ ok: false, error: String(err) }, 500);
+  }
+}
+
+function traiterRenvoyerRapportEcartsV1_(corps) {
+  try {
+    genererEtEnvoyerRapportEcartsV1();
+    return reponseJsonWebhook_({ ok: true });
+  } catch (err) {
+    return reponseJsonWebhook_({ ok: false, error: String(err) }, 500);
+  }
+}
+
 function traiterMiseAJourReglagesDigestV1_(corps) {
   const actif = corps.actif === true ? "OUI" : "NON";
   const seuilJours = Number(corps.seuilJours);
