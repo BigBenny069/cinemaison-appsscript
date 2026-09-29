@@ -3,7 +3,18 @@
  * CinéMaison V4
  * Script : 02_TMDB.gs
  * Rôle   : Recherche et enrichissement TMDb fiabilisés
- * Version: 4.6.3
+ * Version: 4.6.4
+ *
+ * Correctif V4.6.4 (29/09/2026) : les noms d'acteurs/réalisateurs
+ * enregistrés sur TMDb en écriture non latine (kanji, cyrillique...)
+ * remontaient tels quels dans Casting/Réalisateur -- &language=fr-FR
+ * ne traduit que le contenu (synopsis, genres), jamais le nom d'une
+ * personne. Signalé par Ben sur "Nicky Larson, City Hunter" (doublage
+ * japonais d'origine). Nouvelle fonction nomLisibleTMDb_ : cherche un
+ * alias en alphabet latin dans les also_known_as de la personne,
+ * UNIQUEMENT quand son nom est détecté en écriture non latine (cas
+ * rare -- pas d'appel réseau supplémentaire pour la quasi-totalité
+ * des castings).
  *
  * Correctif V4.6.3 (19/09/2026) : ajout d'un garde-fou défensif
  * (avertirSiTypeInattendu_, 01_UTILS.gs) avant les 2 choix d'endpoint
@@ -261,6 +272,53 @@ function chargerDetailTMDbAvecRepli_(tmdbId, type, apiKey, commentaireMatching, 
 }
 
 
+/**
+ * Détecte une écriture non latine (kanji, hangul, cyrillique, arabe,
+ * thaï...) dans un nom -- déclenche la recherche d'un alias en
+ * alphabet latin. Autorise les lettres latines de base + accents
+ * français/européens courants (À-ÿ) + ponctuation usuelle des noms
+ * propres (espace, tiret, apostrophe, point, virgule).
+ */
+function contientEcritureNonLatine_(nom) {
+  return /[^\x00-\x7FÀ-ÿ\s\-'.,]/.test(String(nom || ""));
+}
+
+/**
+ * Cherche, parmi les also_known_as d'une personne TMDb, le premier
+ * alias entièrement en alphabet latin. null si aucun (ou en cas
+ * d'erreur réseau -- ne bloque jamais l'enrichissement pour ça).
+ */
+function trouverAliasLatinTMDb_(personId, apiKey) {
+  try {
+    const url =
+      "https://api.themoviedb.org/3/person/" +
+      encodeURIComponent(personId) +
+      "?api_key=" + encodeURIComponent(apiKey);
+    const res = fetchTMDbAvecRetry_(url, "alias personne " + personId);
+    if (res.getResponseCode() !== 200) return null;
+    const json = parserJsonTMDb_(res.getContentText(), "alias personne " + personId);
+    const alias = (json.also_known_as || []).find(function (a) {
+      return a && !contientEcritureNonLatine_(a);
+    });
+    return alias || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Nom d'affichage d'une personne (acteur/réalisateur) : son nom TMDb
+ * tel quel s'il est déjà en alphabet latin (cas normal, aucun appel
+ * réseau) ; sinon, un alias latin trouvé dans also_known_as ; sinon,
+ * repli sur le nom d'origine (mieux vaut un nom en écriture native
+ * que rien).
+ */
+function nomLisibleTMDb_(personne, apiKey) {
+  if (!contientEcritureNonLatine_(personne.name)) return personne.name;
+  const alias = trouverAliasLatinTMDb_(personne.id, apiKey);
+  return alias || personne.name;
+}
+
 function chargerDetailTMDbSurEndpoint_(tmdbId, endpoint, apiKey, commentaireMatching, scoreForce) {
   const url =
     "https://api.themoviedb.org/3/" +
@@ -290,22 +348,33 @@ function chargerDetailTMDbSurEndpoint_(tmdbId, endpoint, apiKey, commentaireMatc
   const cast = credits.cast || [];
 
 
+  // CORRECTIF (29/09/2026) -- language=fr-FR ci-dessus ne change RIEN
+  // au nom d'une personne : TMDb n'a pas de traduction par langue pour
+  // les noms, uniquement pour le contenu (synopsis, genres...). Un
+  // acteur/doubleur enregistré sur TMDb sous son écriture native
+  // (kanji, cyrillique...) sans alias latin défini comme nom principal
+  // remonte donc tel quel -- signalé par Ben sur "Nicky Larson, City
+  // Hunter" (doublage japonais d'origine, plusieurs noms de la
+  // distribution en kanji). Un appel TMDb supplémentaire, UNIQUEMENT
+  // pour les noms détectés en écriture non latine (cas rare -- la
+  // quasi-totalité des castings n'en a besoin d'aucun), cherche un
+  // alias en alphabet latin parmi les also_known_as de la personne.
   const realisateur =
     endpoint === "movie"
       ? crew
           .filter(p => p.job === "Director")
-          .map(p => p.name)
+          .map(p => nomLisibleTMDb_(p, apiKey))
           .join(", ")
       : crew
           .filter(p => ["Creator", "Director"].includes(p.job))
-          .map(p => p.name)
+          .map(p => nomLisibleTMDb_(p, apiKey))
           .filter((v, i, a) => a.indexOf(v) === i)
           .join(", ");
 
 
   const casting = cast
     .slice(0, 8)
-    .map(p => p.name)
+    .map(p => nomLisibleTMDb_(p, apiKey))
     .join(", ");
 
 
