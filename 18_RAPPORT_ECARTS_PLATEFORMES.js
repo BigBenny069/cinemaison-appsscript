@@ -13,7 +13,18 @@
  *             DERNIERES_SUGGESTIONS_PLATEFORMES (voir 09_WEBHOOK.gs),
  *             donc toujours la donnée du dernier scan de chaque
  *             plateforme, même si le scan remonte à plusieurs jours.
- * Version : 1.4
+ * Version : 1.5
+ *
+ * Correctif V1.5 (30/09/2026) : "à retirer" exige maintenant une
+ * absence confirmée sur 2 scans (jours différents) avant de signaler
+ * une fiche, plutôt que de se fier à une seule absence du jour --
+ * signalé par Ben sur des films encore accessibles jusqu'à 23h59 le
+ * jour de leur retrait, remontés "à retirer" prématurément le jour
+ * même (Netflix semble parfois retirer un titre de "Ma Liste" un peu
+ * avant l'heure réelle de fin de disponibilité). Nouvel onglet
+ * ECARTS_RETRAIT_EN_ATTENTE mémorisant la première date où chaque
+ * fiche a été vue manquante ; remise à zéro dès qu'elle réapparaît
+ * dans un scan (fausse alerte résolue). Voir filtrerManquantsConfirmesV1_.
  *
  * Correctif V1.4 (30/09/2026) : "Validé, c'est normal"/"Ignorer" a
  * maintenant une vraie mémoire persistante -- le rapport consulte
@@ -286,7 +297,80 @@ function calculerEcartsRetraitV1_(plateforme) {
     if (!id || idsScannes[id]) continue;
     manquants.push({ id: id, titre: titre, affiche: hFilms.Affiche !== undefined ? String(ligne[hFilms.Affiche] || "") : "" });
   }
-  return manquants;
+
+  // NOUVEAU (30/09/2026) -- une absence du scan du jour peut être un
+  // faux positif ponctuel (limite de minuit sur la date de retrait,
+  // Netflix qui retire un titre de "Ma Liste" un peu avant l'heure
+  // réelle de fin de disponibilité, aléa de défilement...) -- signalé
+  // par Ben sur "Inside Llewyn Davis" : remonté "à retirer" le jour
+  // même de son dernier jour, alors qu'il était encore accessible
+  // jusqu'à 23h59. Une fiche n'est désormais signalée "à retirer" que
+  // si elle est absente du scan pour la SECONDE fois (jour différent
+  // du premier constat) -- une simple absence du jour est mémorisée
+  // sans être encore signalée. Dès qu'une fiche réapparaît dans un
+  // scan, son compteur est remis à zéro (fausse alerte résolue).
+  return filtrerManquantsConfirmesV1_(plateforme, manquants);
+}
+
+function filtrerManquantsConfirmesV1_(plateforme, manquants) {
+  const classeur = SpreadsheetApp.getActiveSpreadsheet();
+  const NOM_FEUILLE = "ECARTS_RETRAIT_EN_ATTENTE";
+  let feuille = classeur.getSheetByName(NOM_FEUILLE);
+  if (!feuille) {
+    feuille = classeur.insertSheet(NOM_FEUILLE);
+    feuille.getRange(1, 1, 1, 3).setValues([["Plateforme", "IDFilm", "PremiereFoisVuManquantLe"]]).setFontWeight("bold");
+  }
+
+  const aujourdHui = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+
+  // Charge l'état actuel (toutes plateformes -- on ne réécrit que la
+  // ligne concernée, jamais les autres).
+  const derniereLigne = feuille.getLastRow();
+  const lignesExistantes = derniereLigne >= 2 ? feuille.getRange(2, 1, derniereLigne - 1, 3).getValues() : [];
+  const enAttente = {}; // id -> { ligne: n° de ligne réelle, date: "yyyy-MM-dd" }
+  const autresPlateformes = []; // lignes à conserver telles quelles (autres plateformes)
+  lignesExistantes.forEach(function (ligne, i) {
+    const p = String(ligne[0] || "").trim();
+    const id = String(ligne[1] || "").trim();
+    if (!id) return;
+    if (p === plateforme) {
+      enAttente[id] = String(ligne[2] || "").trim();
+    } else {
+      autresPlateformes.push(ligne);
+    }
+  });
+
+  const idsManquantsAujourdhui = {};
+  manquants.forEach(function (m) { idsManquantsAujourdhui[m.id] = true; });
+
+  const confirmes = [];
+  const nouvelEtatPlateforme = [];
+  manquants.forEach(function (m) {
+    const datePremiereVue = enAttente[m.id];
+    if (datePremiereVue && datePremiereVue !== aujourdHui) {
+      // Vu manquant un jour différent du jour courant -> confirmé,
+      // on continue de le signaler (garde la date d'origine, pas
+      // besoin de la mettre à jour).
+      confirmes.push(m);
+      nouvelEtatPlateforme.push([plateforme, m.id, datePremiereVue]);
+    } else {
+      // Première fois vu manquant (ou déjà vu aujourd'hui même, rapport
+      // généré 2x le même jour) -- pas encore confirmé.
+      nouvelEtatPlateforme.push([plateforme, m.id, datePremiereVue || aujourdHui]);
+    }
+  });
+  // Les fiches de cette plateforme qui N'APPARAISSENT PLUS dans
+  // manquants (réapparues dans le dernier scan) sont simplement omises
+  // de nouvelEtatPlateforme -- fausse alerte résolue, compteur remis à
+  // zéro naturellement.
+
+  const toutesLesLignes = autresPlateformes.concat(nouvelEtatPlateforme);
+  feuille.getRange(2, 1, Math.max(feuille.getMaxRows() - 1, toutesLesLignes.length), 3).clearContent();
+  if (toutesLesLignes.length > 0) {
+    feuille.getRange(2, 1, toutesLesLignes.length, 3).setValues(toutesLesLignes);
+  }
+
+  return confirmes;
 }
 
 /**
