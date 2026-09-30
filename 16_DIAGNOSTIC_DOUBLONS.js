@@ -10,8 +10,14 @@
  *             - PLATEFORMES DIFFÉRENTES : normal et voulu (le même film
  *               peut légitimement être suivi sur CANAL+ ET Prime en même
  *               temps) -- pour information seulement, rien à corriger.
- * Version : 1.8 (27/09/2026)
+ * Version : 1.9 (30/09/2026)
  * ============================================================
+ *
+ * Correctif V1.9 (30/09/2026) : genererEtEnvoyerRapportDoublonsV1
+ * envoie maintenant un mail RAS quand aucun doublon même plateforme
+ * n'est trouvé, plutôt que de sortir silencieusement -- demandé par
+ * Ben pour avoir une confirmation par mail après un lancement manuel
+ * depuis Réglages, comme pour le rapport "Écarts plateformes".
  *
  * Correctif V1.8 : le regroupement par plateforme comparait le texte
  * BRUT de la colonne Plateforme -- "CANAL+"/"Canal+",
@@ -231,12 +237,31 @@ function detecterDoublonsFilmsV1() {
 function genererEtEnvoyerRapportDoublonsV1() {
   const { memePlateforme } = calculerDoublonsFilmsV1_();
 
+  // MODIFIÉ (30/09/2026) -- envoie maintenant un mail RAS même sans
+  // doublon trouvé, plutôt que de sortir silencieusement -- demandé
+  // par Ben pour avoir une confirmation par mail après un lancement
+  // manuel depuis Réglages (le bouton lui-même montre déjà "✓ FAIT"
+  // dans l'app, mais rien ne l'indiquait par mail, contrairement au
+  // rapport "Écarts plateformes"). Même destinataires (AjoutAutoPrime).
+  const destinataires = destinatairesPourService_("AjoutAutoPrime");
+
   if (memePlateforme.length === 0) {
-    journal_("DIAGNOSTIC_DOUBLONS", "HEBDOMADAIRE", "OK", "Aucun doublon même plateforme.");
+    if (destinataires) {
+      MailApp.sendEmail({
+        to: destinataires,
+        subject: "CinéMaison - V2 - RAS (doublons)",
+        htmlBody:
+          '<div style="font-family:Arial,sans-serif;background:#F5EFE0;padding:24px"><div style="background:#FFFBF2;border-radius:8px;padding:20px;max-width:480px;margin:0 auto">' +
+          '<p style="font-size:18px;font-weight:bold;color:#3A2E22;margin:0 0 4px">CINÉMAISON</p>' +
+          '<p style="font-size:11px;color:#9A9182;letter-spacing:1px;margin:0 0 16px">DOUBLONS &middot; CONTRÔLE</p>' +
+          '<p style="font-size:13px;color:#3A2E22">Contrôle doublons exécuté avec succès -- aucun doublon même plateforme trouvé cette fois.</p>' +
+          "</div></div>",
+      });
+    }
+    journal_("DIAGNOSTIC_DOUBLONS", "HEBDOMADAIRE", "OK_RAS", "Aucun doublon même plateforme.");
     return;
   }
 
-  const destinataires = destinatairesPourService_("AjoutAutoPrime");
   if (destinataires) {
     const html = construireHtmlRapportDoublonsV1_(memePlateforme);
     MailApp.sendEmail({
