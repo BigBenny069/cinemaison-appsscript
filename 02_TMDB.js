@@ -3,7 +3,17 @@
  * CinéMaison V4
  * Script : 02_TMDB.gs
  * Rôle   : Recherche et enrichissement TMDb fiabilisés
- * Version: 4.6.4
+ * Version: 4.6.5
+ *
+ * Correctif V4.6.5 (30/09/2026) : second recours pour les noms non
+ * latins sans alias TMDb (70 fiches sur 118 lors du rattrapage du
+ * 29/09/2026) -- DeepL API translittère le nom en alphabet latin
+ * (gratuit sans carte bancaire, préféré à Google Cloud Translation sur
+ * remarque de Ben). Nouvelle config DeepLApiKey (feuille CONFIG).
+ * Bénéficie automatiquement à la fois aux nouvelles fiches ET au
+ * rattrapage en lot (20_RETRADUCTION_CASTING.gs appelle la même
+ * fonction chargerDetailTMDbAvecRepli_) -- aucun autre fichier à
+ * modifier pour couvrir les deux cas.
  *
  * Correctif V4.6.4 (29/09/2026) : les noms d'acteurs/réalisateurs
  * enregistrés sur TMDb en écriture non latine (kanji, cyrillique...)
@@ -313,10 +323,68 @@ function trouverAliasLatinTMDb_(personId, apiKey) {
  * repli sur le nom d'origine (mieux vaut un nom en écriture native
  * que rien).
  */
+/**
+ * NOUVEAU (30/09/2026) -- deuxième et dernier recours quand aucun
+ * alias latin n'existe dans also_known_as (cas fréquent pour un
+ * acteur/réalisateur peu connu hors de son pays -- 70 fiches sur 118
+ * concernées lors du rattrapage du 29/09/2026). Google Cloud
+ * Translation API translittère le nom (pas une vraie "traduction" --
+ * un nom propre n'a pas de sens à traduire, mais l'API rend
+ * naturellement sa version en alphabet latin). Clé API dans
+ * GoogleTranslateApiKey (feuille CONFIG, même mécanisme que
+ * TMDbApiKey) -- si absente, retourne null sans bloquer
+ * l'enrichissement (le nom d'origine reste affiché, comme avant ce
+ * correctif).
+ */
+/**
+ * NOUVEAU (30/09/2026) -- deuxième et dernier recours quand aucun
+ * alias latin n'existe dans also_known_as (cas fréquent pour un
+ * acteur/réalisateur peu connu hors de son pays -- 70 fiches sur 118
+ * concernées lors du rattrapage du 29/09/2026). DeepL API translittère
+ * le nom (pas une vraie "traduction" -- un nom propre n'a pas de sens
+ * à traduire, mais l'API rend naturellement sa version en alphabet
+ * latin). Choisi plutôt que Google Cloud Translation (remarque de
+ * Ben, 30/09/2026) : même volume gratuit (500 000 caractères/mois,
+ * largement suffisant ici) mais SANS carte bancaire à enregistrer --
+ * l'API gratuite DeepL tourne sur un hôte séparé (api-free.deepl.com)
+ * qui ne demande aucune facturation. Clé API dans DeepLApiKey (feuille
+ * CONFIG, même mécanisme que TMDbApiKey) -- si absente, retourne null
+ * sans bloquer l'enrichissement (le nom d'origine reste affiché,
+ * comme avant ce correctif).
+ */
+function translittererNomV1_(nom, cleDeepL) {
+  if (!cleDeepL) return null;
+  try {
+    // Une clé API Free DeepL se termine toujours par ":fx" -- distingue
+    // l'hôte gratuit (api-free.deepl.com) du payant (api.deepl.com).
+    const hote = /:fx$/.test(cleDeepL) ? "api-free.deepl.com" : "api.deepl.com";
+    const options = {
+      method: "post",
+      contentType: "application/json",
+      headers: { Authorization: "DeepL-Auth-Key " + cleDeepL },
+      payload: JSON.stringify({ text: [nom], target_lang: "FR" }),
+      muteHttpExceptions: true,
+    };
+    const res = UrlFetchApp.fetch("https://" + hote + "/v2/translate", options);
+    if (res.getResponseCode() !== 200) return null;
+    const json = JSON.parse(res.getContentText());
+    const traduit = json.translations && json.translations[0] && json.translations[0].text;
+    if (!traduit) return null;
+    // DeepL renvoie parfois le texte inchangé si aucune transformation
+    // n'est possible -- dans ce cas, toujours pas d'alphabet latin,
+    // pas la peine de garder ce résultat.
+    return contientEcritureNonLatine_(traduit) ? null : traduit;
+  } catch (e) {
+    return null;
+  }
+}
+
 function nomLisibleTMDb_(personne, apiKey) {
   if (!contientEcritureNonLatine_(personne.name)) return personne.name;
   const alias = trouverAliasLatinTMDb_(personne.id, apiKey);
-  return alias || personne.name;
+  if (alias) return alias;
+  const translitteration = translittererNomV1_(personne.name, lireConfig_("DeepLApiKey", ""));
+  return translitteration || personne.name;
 }
 
 function chargerDetailTMDbSurEndpoint_(tmdbId, endpoint, apiKey, commentaireMatching, scoreForce) {
