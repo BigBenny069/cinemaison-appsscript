@@ -7,7 +7,15 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.21
+ * Version: 2.22
+ *
+ * Correctif V2.22 (30/09/2026) : le mail "Détail du contrôle" affiche
+ * maintenant l'ancienne date à côté de la nouvelle en cas de
+ * changement ("part le ancienne &rarr; nouvelle", nouvelle en gras) --
+ * jusqu'ici "(changement)" ne disait jamais vers quoi. Même principe
+ * que le mail Canal+ (06_CONNECTEURS_PLATEFORMES.gs). Demandé par Ben
+ * pour Prime/Netflix -- voir 11_CONTROLE_PRIME_OFFICIEL.gs et
+ * 17_CONTROLE_STREAMING_GENERIQUE.gs (nouveau champ dateRetraitAvant).
  *
  * Correctif V2.21 (29/09/2026) : deux nouvelles actions doPost pour
  * des boutons dans Réglages (app React) -- "lancerControleDoublons"
@@ -555,7 +563,21 @@ function construirePageDetailControleV1_(plateforme) {
       if (f.type) sousLignes.push(f.type);
       if (f.duree) sousLignes.push(f.duree);
       if (f.plateforme) sousLignes.push(f.plateforme);
-      if (f.dateRetrait) sousLignes.push("part le " + f.dateRetrait + (f.changee ? " (changement)" : ""));
+      // MODIFIÉ (30/09/2026) -- affiche maintenant l'ancienne date en
+      // plus de la nouvelle en cas de changement (ancienne &rarr;
+      // nouvelle, nouvelle en gras) -- même principe que le mail
+      // Canal+ (construireFicheModificationCanalV1_,
+      // 06_CONNECTEURS_PLATEFORMES.gs). "(changement)" ne disait
+      // jusqu'ici jamais vers quoi. Demandé par Ben pour Prime/Netflix.
+      if (f.dateRetrait) {
+        if (f.changee && f.dateRetraitAvant) {
+          sousLignes.push(
+            "part le " + f.dateRetraitAvant + ' &rarr; <span style="font-weight:bold">' + f.dateRetrait + "</span>"
+          );
+        } else {
+          sousLignes.push("part le " + f.dateRetrait + (f.changee ? " (changement)" : ""));
+        }
+      }
       if (f.raison) sousLignes.push(f.raison);
       if (f.raisonConflit) sousLignes.push(f.raisonConflit);
       return '<div style="display:flex;align-items:flex-start;padding:8px 0;border-bottom:1px solid #EFE7D6">' +
