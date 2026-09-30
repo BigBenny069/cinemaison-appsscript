@@ -3,8 +3,14 @@
  * CinéMaison V4
  * Script  : 11_CONTROLE_PRIME_OFFICIEL.gs
  * Rôle    : Diagnostic et import sécurisé des résultats Prime Video officiels
- * Version : 1.7 (23/09/2026)
+ * Version : 1.8 (30/09/2026)
  * ============================================================
+ *
+ * Correctif V1.8 (30/09/2026) : les deux blocs de dates validées
+ * (arrivée et retrait) transmettent maintenant dateRetraitAvant au
+ * mail "Détail du contrôle" -- l'ancienne date était déjà lue pour
+ * calculer changee mais jamais montrée. Voir 09_WEBHOOK.gs pour
+ * l'affichage (ancienne &rarr; nouvelle). Demandé par Ben.
  *
  * Correctif V1.7 (23/09/2026) : ajout du bloc ARRIVEE_DETECTEE,
  * symétrique de DATE_DETECTEE mais pour une fiche BIENTOT_DISPONIBLE
@@ -512,6 +518,16 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
       details.datesValidees.push(Object.assign(detailFiche_(film, idFilm), {
         dateRetrait: formaterDatePrimeV110_(dateArrivee),
         changee: dateArriveeChangee,
+        // NOUVEAU (30/09/2026) -- voir 17_CONTROLE_STREAMING_GENERIQUE.js,
+        // même correctif : l'ancienne date, déjà lue juste au-dessus,
+        // est maintenant transmise au mail (demandé par Ben, même
+        // principe que le mail Canal+).
+        // && ancienneDateArrivee -- évite de formater une date vide
+        // (Utilities.formatDate plante sur null/"") le jour où cette
+        // fiche reçoit sa toute première date : dateArriveeChangee
+        // est vrai (vide != une vraie date) mais rien d'utile à
+        // afficher comme "avant".
+        dateRetraitAvant: dateArriveeChangee && ancienneDateArrivee ? formaterDatePrimeV110_(ancienneDateArrivee) : null,
       }));
       Logger.log(
         "DATE ARRIVÉE VALIDÉE | " + idFilm + " | ligne " + film.ligne + " | " +
@@ -622,6 +638,8 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
     details.datesValidees.push(Object.assign(detailFiche_(film, idFilm), {
       dateRetrait: formaterDatePrimeV110_(dateRetrait),
       changee: dateChangee,
+      // NOUVEAU (30/09/2026) -- voir plus haut / 17_CONTROLE_STREAMING_GENERIQUE.js. Même garde && ancienneDate (date vide -> pas de "avant" affiché).
+      dateRetraitAvant: dateChangee && ancienneDate ? formaterDatePrimeV110_(ancienneDate) : null,
     }));
     Logger.log(
       "DATE VALIDÉE | " + idFilm + " | ligne " + film.ligne + " | " +
