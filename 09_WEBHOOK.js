@@ -7,7 +7,21 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.22
+ * Version: 2.23
+ *
+ * Correctif V2.23 (30/09/2026) : bug important -- traiterAlerteSuggestionsPrimeV1_
+ * et traiterAlerteSuggestionsStreamingV1_ ne sauvegardaient JAMAIS le
+ * "RAS" (rien à signaler) dans DERNIERES_SUGGESTIONS_PLATEFORMES --
+ * les deux branches RAS retournaient avant d'appeler
+ * sauvegarderDernieresSuggestionsV1_. Le mail "Écarts plateformes"
+ * (18_RAPPORT_ECARTS_PLATEFORMES.gs) continuait donc d'afficher
+ * d'anciennes suggestions/ambiguïtés résolues depuis longtemps, à
+ * chaque fois qu'un run derrière était "RAS" pour cette plateforme --
+ * explique tous les mails obsolètes signalés par Ben ces derniers
+ * jours (probablement bien plus que le simple décalage horaire avec
+ * le déclencheur automatique 8h, déjà supposé jusqu'ici). Les deux
+ * fonctions sauvegardent maintenant explicitement des listes vides
+ * dès qu'un RAS est reçu, avant même la vérification anti-doublon.
  *
  * Correctif V2.22 (30/09/2026) : le mail "Détail du contrôle" affiche
  * maintenant l'ancienne date à côté de la nouvelle en cas de
@@ -803,6 +817,17 @@ function traiterAlerteSuggestionsPrimeV1_(corps) {
   const fiches = Array.isArray(corps.fiches) ? corps.fiches : [];
   const ambiguites = Array.isArray(corps.ambiguites) ? corps.ambiguites : [];
   if (fiches.length === 0 && ambiguites.length === 0) {
+    // CORRECTIF (30/09/2026) -- les deux branches RAS ci-dessous
+    // retournaient SANS jamais appeler sauvegarderDernieresSuggestionsV1_,
+    // laissant indéfiniment en place le dernier contenu NON VIDE
+    // sauvegardé -- potentiellement vieux de plusieurs jours. Le mail
+    // "Écarts plateformes" (18_RAPPORT_ECARTS_PLATEFORMES.gs, qui LIT
+    // cette sauvegarde) continuait donc de montrer d'anciennes
+    // suggestions/ambiguïtés bien après qu'elles aient été résolues,
+    // à chaque fois que Prime tombait sur un passage "RAS" -- constaté
+    // par Ben (mail du 30/09/2026 14h19, toujours "Lire S. 1 Ép. 1"/
+    // "The Good Fight" alors que le run du jour avait trouvé 0/0).
+    sauvegarderDernieresSuggestionsV1_("PRIME", [], []);
     if (dejaTraiteRecemment_("alerteSuggestionsPrime_RAS")) {
       return reponseJsonWebhook_({ ok: true, mailEnvoye: false, doublonIgnore: true });
     }
@@ -940,6 +965,9 @@ function traiterAlerteSuggestionsStreamingV1_(corps) {
   const fiches = Array.isArray(corps.fiches) ? corps.fiches : [];
   const ambiguites = Array.isArray(corps.ambiguites) ? corps.ambiguites : [];
   if (fiches.length === 0 && ambiguites.length === 0) {
+    // CORRECTIF (30/09/2026) -- voir traiterAlerteSuggestionsPrimeV1_
+    // ci-dessus, même bug exact (Netflix/Disney+/Canal+ ici).
+    sauvegarderDernieresSuggestionsV1_(plateforme, [], []);
     if (dejaTraiteRecemment_("alerteSuggestionsStreaming_RAS_" + plateforme)) {
       return reponseJsonWebhook_({ ok: true, mailEnvoye: false, doublonIgnore: true });
     }
