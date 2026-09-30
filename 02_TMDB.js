@@ -3,7 +3,14 @@
  * CinéMaison V4
  * Script : 02_TMDB.gs
  * Rôle   : Recherche et enrichissement TMDb fiabilisés
- * Version: 4.6.6
+ * Version: 4.6.7
+ *
+ * Correctif V4.6.7 (30/09/2026) : guillemets typographiques ("..."/
+ * '...') et tirets cadratins ajoutés à la ponctuation autorisée --
+ * "Dr. Roseann "Chic" Canfora" (simple surnom entre guillemets)
+ * n'a rien à voir avec l'écriture non latine et ne doit pas
+ * déclencher de recherche d'alias/translittération. Dernier cas
+ * trouvé après le rattrapage du 30/09/2026 (118 → 0 fiche restante).
  *
  * Correctif V4.6.6 (30/09/2026) : détection de l'écriture non latine
  * élargie (Latin Extended-A/B, vietnamien) -- des noms européens avec
@@ -306,7 +313,12 @@ function contientEcritureNonLatine_(nom) {
   // 30/09/2026, dont plusieurs faux positifs constatés par Ben).
   // Latin Extended-A/B (U+0100-024F) + Latin Extended Additional
   // (U+1E00-1EFF, vietnamien) + diacritiques combinants ajoutés.
-  return /[^\x00-\x7F\u00C0-\u024F\u1E00-\u1EFF\u0300-\u036F\s\-'.,]/.test(String(nom || ""));
+  // CORRECTIF 2 (30/09/2026) -- guillemets typographiques ("..." U+201C/
+  // U+201D, '...' U+2018/2019, tiret cadratin U+2014/2013) ajoutés à la
+  // ponctuation autorisée -- une simple citation dans un nom ("Dr.
+  // Roseann "Chic" Canfora") n'a rien à voir avec l'écriture et ne
+  // doit pas déclencher de recherche d'alias/translittération.
+  return /[^\x00-\x7F\u00C0-\u024F\u1E00-\u1EFF\u0300-\u036F\u2018\u2019\u201C\u201D\u2013\u2014\s\-'.,]/.test(String(nom || ""));
 }
 
 /**
