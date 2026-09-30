@@ -13,7 +13,17 @@
  *             DERNIERES_SUGGESTIONS_PLATEFORMES (voir 09_WEBHOOK.gs),
  *             donc toujours la donnée du dernier scan de chaque
  *             plateforme, même si le scan remonte à plusieurs jours.
- * Version : 1.5
+ * Version : 1.6
+ *
+ * Correctif V1.6 (30/09/2026) : affiné sur suggestion de Ben --
+ * "à retirer" utilise maintenant en priorité la date théorique de
+ * retrait déjà connue dans le Sheet (DateDisponibiliteAuto) : une
+ * fiche manquante du scan n'est confirmée que si cette date est
+ * STRICTEMENT dépassée (le jour même du retrait, encore accessible
+ * jusqu'à 23h59, ne compte pas). Quand aucune date théorique n'est
+ * connue (retrait surprise, sans préavis), repli sur la confirmation
+ * à 2 scans du V1.5 comme filet de sécurité. Voir dateStrictementPasseeV1_
+ * et filtrerManquantsConfirmesV1_.
  *
  * Correctif V1.5 (30/09/2026) : "à retirer" exige maintenant une
  * absence confirmée sur 2 scans (jours différents) avant de signaler
@@ -295,7 +305,15 @@ function calculerEcartsRetraitV1_(plateforme) {
     if (!estDeCettePlateforme(ligne[hFilms.Plateforme])) continue;
     const id = String(ligne[hFilms.ID] || "").trim();
     if (!id || idsScannes[id]) continue;
-    manquants.push({ id: id, titre: titre, affiche: hFilms.Affiche !== undefined ? String(ligne[hFilms.Affiche] || "") : "" });
+    manquants.push({
+      id: id,
+      titre: titre,
+      affiche: hFilms.Affiche !== undefined ? String(ligne[hFilms.Affiche] || "") : "",
+      // NOUVEAU (30/09/2026) -- voir filtrerManquantsConfirmesV1_ : sert
+      // à départager "vraiment parti" de "encore accessible jusqu'à ce
+      // soir, la plateforme a juste retiré l'affichage un peu tôt".
+      dateTheorique: hFilms.DateDisponibiliteAuto !== undefined ? ligne[hFilms.DateDisponibiliteAuto] : null,
+    });
   }
 
   // NOUVEAU (30/09/2026) -- une absence du scan du jour peut être un
@@ -310,6 +328,27 @@ function calculerEcartsRetraitV1_(plateforme) {
   // sans être encore signalée. Dès qu'une fiche réapparaît dans un
   // scan, son compteur est remis à zéro (fausse alerte résolue).
   return filtrerManquantsConfirmesV1_(plateforme, manquants);
+}
+
+/**
+ * true si "date" (valeur de cellule Sheet -- Date ou chaîne) tombe un
+ * jour strictement avant "aujourdHui" (comparaison au jour près,
+ * l'heure n'entre pas en jeu -- un film dont le dernier jour est le
+ * 30 reste valide jusqu'à 23h59 le 30, donc "dépassé" seulement à
+ * partir du 1er).
+ */
+function dateStrictementPasseeV1_(date, aujourdHui) {
+  if (!date) return false;
+  let d;
+  if (Object.prototype.toString.call(date) === "[object Date]") {
+    if (isNaN(date.getTime())) return false;
+    d = Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  } else {
+    const m = String(date).trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return false;
+    d = m[0];
+  }
+  return d < aujourdHui;
 }
 
 function filtrerManquantsConfirmesV1_(plateforme, manquants) {
@@ -327,9 +366,9 @@ function filtrerManquantsConfirmesV1_(plateforme, manquants) {
   // ligne concernée, jamais les autres).
   const derniereLigne = feuille.getLastRow();
   const lignesExistantes = derniereLigne >= 2 ? feuille.getRange(2, 1, derniereLigne - 1, 3).getValues() : [];
-  const enAttente = {}; // id -> { ligne: n° de ligne réelle, date: "yyyy-MM-dd" }
-  const autresPlateformes = []; // lignes à conserver telles quelles (autres plateformes)
-  lignesExistantes.forEach(function (ligne, i) {
+  const enAttente = {};
+  const autresPlateformes = [];
+  lignesExistantes.forEach(function (ligne) {
     const p = String(ligne[0] || "").trim();
     const id = String(ligne[1] || "").trim();
     if (!id) return;
@@ -340,28 +379,39 @@ function filtrerManquantsConfirmesV1_(plateforme, manquants) {
     }
   });
 
-  const idsManquantsAujourdhui = {};
-  manquants.forEach(function (m) { idsManquantsAujourdhui[m.id] = true; });
-
   const confirmes = [];
   const nouvelEtatPlateforme = [];
   manquants.forEach(function (m) {
+    // MODIFIÉ (30/09/2026) -- priorité à la date théorique de retrait
+    // (déjà connue dans le Sheet) sur Ben : un film sans date théorique
+    // dépassée ne devrait normalement pas encore être manquant, mais
+    // au cas où (retrait anticipé réel, glitch plateforme...), la
+    // confirmation sur 2 scans reste le filet de sécurité en second
+    // recours -- jamais les deux logiques en même temps pour une même
+    // fiche, la date théorique tranche dès qu'elle est disponible.
+    if (m.dateTheorique) {
+      if (dateStrictementPasseeV1_(m.dateTheorique, aujourdHui)) {
+        confirmes.push(m);
+      }
+      // Date théorique connue mais pas encore dépassée (ex. dernier
+      // jour = aujourd'hui) -- pas confirmé, et pas la peine de suivre
+      // dans ECARTS_RETRAIT_EN_ATTENTE non plus : le prochain scan
+      // retranchera la même comparaison de date, sans mémoire requise.
+      return;
+    }
+
     const datePremiereVue = enAttente[m.id];
     if (datePremiereVue && datePremiereVue !== aujourdHui) {
-      // Vu manquant un jour différent du jour courant -> confirmé,
-      // on continue de le signaler (garde la date d'origine, pas
-      // besoin de la mettre à jour).
       confirmes.push(m);
       nouvelEtatPlateforme.push([plateforme, m.id, datePremiereVue]);
     } else {
-      // Première fois vu manquant (ou déjà vu aujourd'hui même, rapport
-      // généré 2x le même jour) -- pas encore confirmé.
       nouvelEtatPlateforme.push([plateforme, m.id, datePremiereVue || aujourdHui]);
     }
   });
   // Les fiches de cette plateforme qui N'APPARAISSENT PLUS dans
-  // manquants (réapparues dans le dernier scan) sont simplement omises
-  // de nouvelEtatPlateforme -- fausse alerte résolue, compteur remis à
+  // manquants (réapparues dans le dernier scan), ou qui ont désormais
+  // une date théorique (gérée sans passer par cet onglet), sont
+  // simplement omises de nouvelEtatPlateforme -- compteur remis à
   // zéro naturellement.
 
   const toutesLesLignes = autresPlateformes.concat(nouvelEtatPlateforme);
