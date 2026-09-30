@@ -5,7 +5,12 @@
  * Rôle    : Diagnostic et import sécurisé des résultats officiels
  *           Netflix / Disney+ (équivalent générique de
  *           11_CONTROLE_PRIME_OFFICIEL.gs, laissé intact pour Prime).
- * Version : 1.2
+ * Version : 1.3
+ *
+ * Correctif V1.3 (30/09/2026) : transmet maintenant dateRetraitAvant
+ * au mail "Détail du contrôle" -- même correctif que
+ * 11_CONTROLE_PRIME_OFFICIEL.gs V1.8 (voir 09_WEBHOOK.gs pour
+ * l'affichage). Demandé par Ben, concerne Netflix/Disney+.
  *
  * Correctif V1.2 (13/09/2026) : même correctif que
  * 11_CONTROLE_PRIME_OFFICIEL.gs V1.4 -- detailFiche_ plantait
@@ -312,6 +317,17 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
     details.datesValidees.push(Object.assign(detailFiche_(film, idFilm), {
       dateRetrait: formaterDateStreamingV1_(dateRetrait),
       changee: dateChangee,
+      // NOUVEAU (30/09/2026) -- l'ancienne date était déjà lue juste
+      // au-dessus (ancienneDate) pour calculer dateChangee, mais
+      // jamais transmise au mail -- "(changement)" ne disait jamais
+      // vers quoi. Même principe que le mail Canal+ (ancienneDate/
+      // nouvelleDate), demandé par Ben pour Prime/Netflix.
+      // Le && ancienneDate garde -- formaterDateStreamingV1_ plante sur
+      // une date vide (Utilities.formatDate n'accepte pas null/""),
+      // cas réel d'une toute première date jamais définie sur cette
+      // fiche : dateChangee est alors true (vide != une vraie date)
+      // mais il n'y a rien d'utile à afficher comme "avant".
+      dateRetraitAvant: dateChangee && ancienneDate ? formaterDateStreamingV1_(ancienneDate) : null,
     }));
     Logger.log(
       "DATE VALIDÉE | " + idFilm + " | ligne " + film.ligne + " | " +
