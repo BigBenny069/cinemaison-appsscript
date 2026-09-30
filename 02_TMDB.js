@@ -3,7 +3,14 @@
  * CinéMaison V4
  * Script : 02_TMDB.gs
  * Rôle   : Recherche et enrichissement TMDb fiabilisés
- * Version: 4.6.5
+ * Version: 4.6.6
+ *
+ * Correctif V4.6.6 (30/09/2026) : détection de l'écriture non latine
+ * élargie (Latin Extended-A/B, vietnamien) -- des noms européens avec
+ * diacritiques peu courants (roumain, polonais...) étaient à tort
+ * signalés comme non latins. Corrige des faux positifs constatés par
+ * Ben après le rattrapage DeepL du 30/09/2026 (17 fiches restantes,
+ * dont plusieurs n'avaient en fait rien à corriger).
  *
  * Correctif V4.6.5 (30/09/2026) : second recours pour les noms non
  * latins sans alias TMDb (70 fiches sur 118 lors du rattrapage du
@@ -290,7 +297,16 @@ function chargerDetailTMDbAvecRepli_(tmdbId, type, apiKey, commentaireMatching, 
  * propres (espace, tiret, apostrophe, point, virgule).
  */
 function contientEcritureNonLatine_(nom) {
-  return /[^\x00-\x7FÀ-ÿ\s\-'.,]/.test(String(nom || ""));
+  // CORRECTIF (30/09/2026) -- la plage À-ÿ (Latin-1 Supplement) ne
+  // couvrait pas les diacritiques d'Europe centrale/de l'Est ni du
+  // vietnamien (ș/ț roumains, ł/ż polonais, ă/â déjà couverts par
+  // À-ÿ mais pas tous) -- des noms parfaitement en alphabet latin
+  // comme "Bogdan Mureșanu" ou "Magdalena Różczka" étaient à tort
+  // signalés comme non latins (17 fiches sur le rattrapage du
+  // 30/09/2026, dont plusieurs faux positifs constatés par Ben).
+  // Latin Extended-A/B (U+0100-024F) + Latin Extended Additional
+  // (U+1E00-1EFF, vietnamien) + diacritiques combinants ajoutés.
+  return /[^\x00-\x7F\u00C0-\u024F\u1E00-\u1EFF\u0300-\u036F\s\-'.,]/.test(String(nom || ""));
 }
 
 /**
