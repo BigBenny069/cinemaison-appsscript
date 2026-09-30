@@ -13,7 +13,16 @@
  *             DERNIERES_SUGGESTIONS_PLATEFORMES (voir 09_WEBHOOK.gs),
  *             donc toujours la donnée du dernier scan de chaque
  *             plateforme, même si le scan remonte à plusieurs jours.
- * Version : 1.3
+ * Version : 1.4
+ *
+ * Correctif V1.4 (30/09/2026) : "Validé, c'est normal"/"Ignorer" a
+ * maintenant une vraie mémoire persistante -- le rapport consulte
+ * désormais PRIME_IGNORES/STREAMING_IGNORES (la même liste que les
+ * collecteurs) avant d'inclure une suggestion/ambiguïté, plutôt que de
+ * se fier uniquement à ce que le dernier scan a resauvegardé. Un titre
+ * déjà validé ne revient plus, même si le collecteur régénère la même
+ * ambiguïté avant que son propre filtre n'ait eu le temps de la voir
+ * passer. Signalé par Ben sur "La Malédiction".
  *
  * Correctif V1.3 (24/09/2026) : Partie 1 (À RETIRER) traite maintenant
  * un scan présent mais SANS AUCUNE ligne de données (juste l'entête)
@@ -92,13 +101,76 @@ function installerDeclencheurRapportEcartsV1() {
  * depuis l'éditeur pour tester). Calcule les écarts des 3 plateformes
  * et envoie un mail unique s'il y a quelque chose à signaler.
  */
+/**
+ * NOUVEAU (30/09/2026) -- persistance réelle de "Validé, c'est normal"
+ * / "Ignorer" : ce rapport relisait jusqu'ici DERNIERES_SUGGESTIONS_PLATEFORMES
+ * tel quel, sans jamais consulter la liste des titres déjà ignorés
+ * (PRIME_IGNORES / STREAMING_IGNORES -- alimentée par le clic
+ * "Ignorer"/"Validé, c'est normal", lue par les collecteurs eux-mêmes
+ * pour NE PAS re-proposer un titre déjà tranché). Résultat, signalé
+ * par Ben : une ambiguïté validée pouvait revenir le jour suivant si
+ * le collecteur, lui, la reproduisait avant que le clic n'ait eu
+ * le temps de "prendre" -- le rapport écrasait alors le silence.
+ * Ce filtre applique la MÊME liste que les collecteurs, directement
+ * en lecture Sheet (PRIME_IGNORES/STREAMING_IGNORES vivent dans le
+ * même classeur, pas besoin de repasser par Vercel).
+ *
+ * Même normalisation que lib/prime-ignores.js et lib/streaming-ignores.js
+ * (DOIT rester identique des deux côtés, sinon plus aucune correspondance).
+ */
+function normaliserTitreIgnoresV1_(titre) {
+  return String(titre || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function chargerTitresIgnoresV1_(plateforme) {
+  const classeur = SpreadsheetApp.getActiveSpreadsheet();
+  const ignores = new Set();
+
+  // PRIME_IGNORES -- historique, sans colonne Plateforme (Prime
+  // uniquement, voir lib/prime-ignores.js "laissé tel quel").
+  if (plateforme === "PRIME") {
+    const feuillePrime = classeur.getSheetByName("PRIME_IGNORES");
+    if (feuillePrime && feuillePrime.getLastRow() >= 2) {
+      feuillePrime.getRange(2, 1, feuillePrime.getLastRow() - 1, 2).getValues().forEach(function (ligne) {
+        const titreNorm = String(ligne[0] || "").trim();
+        const type = String(ligne[1] || "").trim();
+        if (titreNorm) ignores.add(titreNorm + "|" + type);
+      });
+    }
+  }
+
+  // STREAMING_IGNORES -- Netflix/Disney+/Canal+, colonne Plateforme.
+  const feuilleStreaming = classeur.getSheetByName("STREAMING_IGNORES");
+  if (feuilleStreaming && feuilleStreaming.getLastRow() >= 2) {
+    feuilleStreaming.getRange(2, 1, feuilleStreaming.getLastRow() - 1, 3).getValues().forEach(function (ligne) {
+      const titreNorm = String(ligne[0] || "").trim();
+      const p = String(ligne[1] || "").trim();
+      const type = String(ligne[2] || "").trim();
+      if (titreNorm && p === plateforme) ignores.add(titreNorm + "|" + type);
+    });
+  }
+
+  return ignores;
+}
+
 function genererEtEnvoyerRapportEcartsV1() {
   const parPlateforme = RAPPORT_ECARTS_PLATEFORMES_V1.map(function (plateforme) {
+    const ignores = chargerTitresIgnoresV1_(plateforme);
+    const filtrerIgnores = function (liste, type) {
+      return liste.filter(function (f) {
+        return !ignores.has(normaliserTitreIgnoresV1_(f.titre) + "|" + type);
+      });
+    };
     return {
       plateforme: plateforme,
       manquants: calculerEcartsRetraitV1_(plateforme),
-      suggestions: lireDernieresSuggestionsV1_(plateforme, "SUGGESTION"),
-      ambiguites: lireDernieresSuggestionsV1_(plateforme, "AMBIGUITE"),
+      suggestions: filtrerIgnores(lireDernieresSuggestionsV1_(plateforme, "SUGGESTION"), "SUGGESTION"),
+      ambiguites: filtrerIgnores(lireDernieresSuggestionsV1_(plateforme, "AMBIGUITE"), "AMBIGUITE"),
     };
   });
 
