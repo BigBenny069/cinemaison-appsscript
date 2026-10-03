@@ -3,10 +3,21 @@
  * CinéMaison V4
  * Script : 06_CONNECTEURS_PLATEFORMES.gs
  * Rôle   : Connecteurs plateformes — CANAL+ uniquement
- * Version: 4.7.8
+ * Version: 4.7.9
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs,
- *               Worker Cloudflare CANAL+ V3.5
+ *               Worker Cloudflare CANAL+ V3.6
  * ============================================================
+ *
+ * Correctif V4.7.9 (03/10/2026) : nouvelle alerte mail sur
+ * A_VERIFIER_CANAL (401 sur une fiche déjà connue, jamais levée en
+ * exception donc jamais comptée dans stats.erreurs -- aucune alerte ne
+ * partait jamais, même après des jours de panne). Même principe que
+ * l'alerte ERREUR_CANAL existante (un seul mail par épisode de panne,
+ * drapeau CanalAlerteAVerifierEnvoyee dans CONFIG). Voir
+ * envoyerMailAlerteAVerifierCanalV4_. Suppose le Worker Cloudflare en
+ * V3.6 (distingue désormais un échec HTTP de recherche d'un vrai
+ * NO_MATCH -- sinon une panne de recherche remontait à tort comme
+ * "film probablement retiré du catalogue"). Demandé par Ben.
  *
  * Correctif V4.7.8 (27/09/2026) : budget de temps (4,5 min) pour un
  * lot du contrôle complet Canal+ -- "Exceeded maximum execution time"
@@ -387,6 +398,34 @@ function continuerControleCompletCanalV4() {
       // Le lot est de nouveau propre : on repose le drapeau pour qu'une
       // future panne redéclenche bien une alerte fraîche.
       ecrireConfig_("CanalAlerteErreurEnvoyee", "");
+    }
+
+    // NOUVEAU (02/10/2026) -- même principe que l'alerte ERREUR_CANAL
+    // ci-dessus, mais pour A_VERIFIER_CANAL (401 sur une fiche dont
+    // l'ID Canal+ était déjà connu -- ne peut normalement JAMAIS
+    // arriver sauf panne technique, contrairement à NON_TROUVE_CANAL
+    // qui peut être un retrait réel). Signalé par Ben : ce cas ne
+    // levait jamais d'exception (401 intercepté proprement côté
+    // Worker), donc stats.erreurs restait à 0 et aucune alerte ne
+    // partait jamais, même quand le Worker tournait en 401 depuis des
+    // jours (clé de session CANAL_ACTION_PASS expirée -- voir
+    // cinemaison-canal-proxy/worker.js). Seuil sur le total cumulé
+    // depuis le début du parcours (etat.aVerifier), pas sur le seul
+    // dernier lot, pour détecter une panne qui dure même si chaque
+    // lot individuel ne compte que quelques fiches.
+    if (etat.aVerifier > 0) {
+      const alerteAVerifierDejaEnvoyee = String(
+        lireConfig_("CanalAlerteAVerifierEnvoyee", "")
+      );
+      if (!alerteAVerifierDejaEnvoyee) {
+        envoyerMailAlerteAVerifierCanalV4_(etat.aVerifier, etat.nonTrouves || 0);
+        ecrireConfig_(
+          "CanalAlerteAVerifierEnvoyee",
+          new Date().toISOString()
+        );
+      }
+    } else if (String(lireConfig_("CanalAlerteAVerifierEnvoyee", ""))) {
+      ecrireConfig_("CanalAlerteAVerifierEnvoyee", "");
     }
 
 
@@ -1440,6 +1479,52 @@ function envoyerMailAlerteErreursCanalV4_(nombreErreurs) {
     "CANAL_ALERTE_ERREUR",
     "OK",
     "Alerte technique envoyée | erreurs=" + nombreErreurs
+  );
+}
+
+// NOUVEAU (02/10/2026) -- voir le point d'appel plus haut
+// (CanalAlerteAVerifierEnvoyee) : alerte sur A_VERIFIER_CANAL (401 sur
+// une fiche déjà connue), qui ne déclenchait jusqu'ici jamais aucun
+// mail. Demandé par Ben.
+function envoyerMailAlerteAVerifierCanalV4_(nombreAVerifier, nombreNonTrouves) {
+  const email = destinatairesPourService_("AlerteTechnique");
+
+  const corps =
+    "CinéMaison - Alerte technique CANAL+\n\n" +
+    "Le contrôle des disponibilités Canal+ a classé " + nombreAVerifier +
+    " fiche(s) \"A vérifier\" (aucune date extraite, souvent une " +
+    "réponse HTTP 401) depuis le début de ce parcours." +
+    (nombreNonTrouves > 0
+      ? " " + nombreNonTrouves + " fiche(s) supplémentaire(s) sont " +
+        "ressorties \"introuvable dans le catalogue\" sur la même " +
+        "période -- à prendre avec prudence pendant une panne : ce " +
+        "message peut être un faux positif (recherche qui échoue en " +
+        "401, pas forcément un vrai retrait Canal+)."
+      : "") +
+    "\n\nCause la plus probable : la clé de session CANAL_ACTION_PASS " +
+    "du Worker Cloudflare (cinemaison-canal-proxy) a expiré -- Canal+ " +
+    "la fait tourner périodiquement. Pour la renouveler : se connecter " +
+    "sur canalplus.com, ouvrir les outils développeur (F12 > Réseau), " +
+    "ouvrir une fiche film, repérer une requête vers " +
+    "/actionLayout/ ou /search/, et copier le segment de l'URL juste " +
+    "après cette partie -- puis mettre à jour le secret " +
+    "CANAL_ACTION_PASS du Worker dans le tableau de bord Cloudflare " +
+    "(Workers & Pages > cinemaison-canal-proxy > Settings > " +
+    "Variables), sans besoin de redéployer le code.\n\n" +
+    "Ce mail ne sera renvoyé qu'une fois la situation redevenue propre " +
+    "puis reproduite -- pas à chaque cycle tant qu'elle dure.";
+
+  MailApp.sendEmail({
+    to: email,
+    subject: "CinéMaison - V2 - ALERTE CANAL+ (fiches à vérifier)",
+    body: corps
+  });
+
+  journal_(
+    "MAILS",
+    "CANAL_ALERTE_A_VERIFIER",
+    "OK",
+    "Alerte technique envoyée | aVerifier=" + nombreAVerifier + " | nonTrouves=" + nombreNonTrouves
   );
 }
 
