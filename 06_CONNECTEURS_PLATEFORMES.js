@@ -3,10 +3,37 @@
  * CinéMaison V4
  * Script : 06_CONNECTEURS_PLATEFORMES.gs
  * Rôle   : Connecteurs plateformes — CANAL+ uniquement
- * Version: 4.7.9
+ * Version: 4.8.1
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs,
  *               Worker Cloudflare CANAL+ V3.6
  * ============================================================
+ *
+ * Correctif V4.8.1 (04/10/2026) : nouveau mail de bilan envoyé à
+ * CHAQUE fin de parcours complet CANAL+ (même sans rien à signaler,
+ * en confirmation) -- demandé par Ben, en complément de l'alerte "en
+ * cours de route" existante (V4.7.9/V4.8.0), qui reste utile pour ne
+ * jamais rater une vraie panne longue mais dont les chiffres ne sont
+ * qu'une photo partielle. Les deux mails sont maintenant clairement
+ * distingués dans leur objet ("EN COURS" vs "TERMINÉ") et leur
+ * première ligne. Voir envoyerMailBilanFinParcoursCanalV4_, appelée
+ * depuis terminerControleCompletCanalV4_. La logique de
+ * liste/catégorisation des fiches "à vérifier", jusqu'ici dans
+ * envoyerMailAlerteAVerifierCanalV4_, est extraite dans
+ * categoriserFichesAVerifierCanalV4_/formaterListeFichesCanalV4_ pour
+ * être partagée par les deux mails sans duplication.
+ *
+ * Correctif V4.8.0 (04/10/2026) : l'alerte A_VERIFIER_CANAL
+ * (V4.7.9) ne donnait qu'un total, jamais le détail des fiches --
+ * demandé par Ben. Relit maintenant le Sheet au moment de l'envoi et
+ * liste les fiches concernées, regroupées par type de souci (erreur
+ * HTTP détectée vs "aucune date extraite" sans erreur). Ce deuxième
+ * groupe s'est avéré largement majoritaire en pratique (37 fiches sur
+ * 40 au premier vrai déclenchement, 0 liées à une clé expirée) --
+ * le texte du mail affirmait jusqu'ici, à tort, que la cause la plus
+ * probable était systématiquement CANAL_ACTION_PASS. Voir
+ * envoyerMailAlerteAVerifierCanalV4_, qui prend maintenant sheet/h
+ * en paramètres (fournis par contexte.sheet/contexte.h, déjà en
+ * portée au point d'appel).
  *
  * Correctif V4.7.9 (03/10/2026) : nouvelle alerte mail sur
  * A_VERIFIER_CANAL (401 sur une fiche déjà connue, jamais levée en
@@ -418,7 +445,12 @@ function continuerControleCompletCanalV4() {
         lireConfig_("CanalAlerteAVerifierEnvoyee", "")
       );
       if (!alerteAVerifierDejaEnvoyee) {
-        envoyerMailAlerteAVerifierCanalV4_(etat.aVerifier, etat.nonTrouves || 0);
+        envoyerMailAlerteAVerifierCanalV4_(
+          etat.aVerifier,
+          etat.nonTrouves || 0,
+          contexte.sheet,
+          contexte.h
+        );
         ecrireConfig_(
           "CanalAlerteAVerifierEnvoyee",
           new Date().toISOString()
@@ -561,6 +593,19 @@ function terminerControleCompletCanalV4_(etat) {
       "IGNORE",
       "Aucune modification réelle de DateDisponibiliteAuto (AO)"
     );
+  }
+
+  // NOUVEAU (04/10/2026) -- bilan de fin de parcours, envoyé à CHAQUE
+  // fin de cycle complet (même sans rien à signaler, pour confirmer
+  // qu'il est bien allé au bout) -- demandé par Ben, en complément de
+  // l'alerte envoyée EN COURS DE ROUTE (envoyerMailAlerteAVerifierCanalV4_,
+  // utile pour ne jamais rater une vraie panne qui dure plusieurs
+  // jours, mais dont les chiffres ne sont qu'une photo partielle).
+  // Contrairement à cette dernière, celui-ci est TOUJOURS le bilan
+  // définitif du parcours qui vient de se terminer.
+  const contextePourBilan = initialiserContexteCanalV41_();
+  if (contextePourBilan) {
+    envoyerMailBilanFinParcoursCanalV4_(etat, contextePourBilan.sheet, contextePourBilan.h);
   }
 
 
@@ -1486,28 +1531,98 @@ function envoyerMailAlerteErreursCanalV4_(nombreErreurs) {
 // (CanalAlerteAVerifierEnvoyee) : alerte sur A_VERIFIER_CANAL (401 sur
 // une fiche déjà connue), qui ne déclenchait jusqu'ici jamais aucun
 // mail. Demandé par Ben.
-function envoyerMailAlerteAVerifierCanalV4_(nombreAVerifier, nombreNonTrouves) {
+//
+// MODIFIÉ (04/10/2026) -- le mail ne donnait qu'un total, jamais le
+// détail des fiches concernées (Ben a dû me les demander à la main).
+// Relit maintenant le Sheet au moment de l'envoi (plutôt que de
+// trimballer une liste à travers les lots, qui peut s'étaler sur
+// plusieurs jours) pour lister les fiches actuellement classées
+// A_VERIFIER_CANAL, regroupées par type de souci (HTTP détecté vs
+// "aucune date extraite" sans erreur HTTP) -- cette dernière catégorie
+// s'est avérée être la plus fréquente en pratique (37 fiches sur 40
+// lors du premier vrai test, 0 liées à une clé expirée) et n'a RIEN à
+// voir avec CANAL_ACTION_PASS, contrairement à ce que le texte du mail
+// affirmait jusqu'ici avec trop d'assurance ("cause la plus probable").
+// Limité à 40 fiches listées par catégorie pour ne pas produire un
+// mail interminable si la situation dégénère.
+// NOUVEAU (04/10/2026) -- extrait de envoyerMailAlerteAVerifierCanalV4_
+// pour être réutilisé aussi par le bilan de fin de parcours
+// (envoyerMailBilanFinParcoursCanalV4_), sans dupliquer la logique de
+// lecture/catégorisation du Sheet.
+function categoriserFichesAVerifierCanalV4_(sheet, h) {
+  const data = sheet.getDataRange().getValues();
+  const avecHttp = [];
+  const sansHttp = [];
+
+  for (let i = 1; i < data.length; i++) {
+    const ligne = data[i];
+    if (String(ligne[h.StatutDisponibiliteAuto] || "") !== "A_VERIFIER_CANAL") continue;
+
+    const titre = String(ligne[h.Titre] || "(sans titre)");
+    const commentaire = String(ligne[h.CommentaireDisponibilite] || "");
+    const entree = titre + (commentaire ? " -- " + commentaire.replace("CANAL+ A VERIFIER : aucune date extraite / ", "") : "");
+
+    if (/HTTP/i.test(commentaire)) {
+      avecHttp.push(entree);
+    } else {
+      sansHttp.push(entree);
+    }
+  }
+
+  return { avecHttp, sansHttp };
+}
+
+function formaterListeFichesCanalV4_(liste, limite) {
+  if (liste.length === 0) return "(aucune)";
+  const tronquee = liste.slice(0, limite);
+  let texte = tronquee.map((l) => "  - " + l).join("\n");
+  if (liste.length > limite) {
+    texte += "\n  ... et " + (liste.length - limite) + " de plus (voir le Sheet, colonne StatutDisponibiliteAuto)";
+  }
+  return texte;
+}
+
+function envoyerMailAlerteAVerifierCanalV4_(nombreAVerifier, nombreNonTrouves, sheet, h) {
   const email = destinatairesPourService_("AlerteTechnique");
+  const LIMITE_LISTE = 40;
+
+  const { avecHttp, sansHttp } = categoriserFichesAVerifierCanalV4_(sheet, h);
+  const formaterListe_ = (liste) => formaterListeFichesCanalV4_(liste, LIMITE_LISTE);
 
   const corps =
     "CinéMaison - Alerte technique CANAL+\n\n" +
+    "⚠ CONTRÔLE EN COURS -- ceci est une photo à l'instant T, le " +
+    "parcours continue et ces chiffres peuvent encore bouger avant la " +
+    "fin (voir le mail \"contrôle TERMINÉ\" pour le bilan définitif).\n\n" +
     "Le contrôle des disponibilités Canal+ a classé " + nombreAVerifier +
-    " fiche(s) \"A vérifier\" (aucune date extraite, souvent une " +
-    "réponse HTTP 401) depuis le début de ce parcours." +
+    " fiche(s) \"A vérifier\" depuis le début de ce parcours. Total " +
+    "actuel dans le Sheet (peut avoir encore bougé depuis) : " +
+    (avecHttp.length + sansHttp.length) + " fiche(s).\n\n" +
+    "-- Avec une erreur HTTP détectée (" + avecHttp.length + ") --\n" +
+    "Signal le plus fiable d'un vrai souci technique (clé " +
+    "CANAL_ACTION_PASS expirée si 401, lien cassé côté Canal+ si 404) :\n" +
+    formaterListe_(avecHttp) +
+    "\n\n-- \"Aucune date extraite\" sans erreur HTTP (" + sansHttp.length + ") --\n" +
+    "La page a répondu normalement, mais aucune date de fin de " +
+    "disponibilité n'a pu être repérée dedans -- pas forcément un bug, " +
+    "peut simplement vouloir dire que Canal+ n'affiche aucune date " +
+    "pour ces titres. À surveiller si ce groupe reste élevé après un " +
+    "cycle complet, mais ce n'est PAS lié à CANAL_ACTION_PASS :\n" +
+    formaterListe_(sansHttp) +
     (nombreNonTrouves > 0
-      ? " " + nombreNonTrouves + " fiche(s) supplémentaire(s) sont " +
+      ? "\n\n" + nombreNonTrouves + " fiche(s) supplémentaire(s) sont " +
         "ressorties \"introuvable dans le catalogue\" sur la même " +
         "période -- à prendre avec prudence pendant une panne : ce " +
         "message peut être un faux positif (recherche qui échoue en " +
         "401, pas forcément un vrai retrait Canal+)."
       : "") +
-    "\n\nCause la plus probable : la clé de session CANAL_ACTION_PASS " +
-    "du Worker Cloudflare (cinemaison-canal-proxy) a expiré -- Canal+ " +
-    "la fait tourner périodiquement. Pour la renouveler : se connecter " +
-    "sur canalplus.com, ouvrir les outils développeur (F12 > Réseau), " +
-    "ouvrir une fiche film, repérer une requête vers " +
-    "/actionLayout/ ou /search/, et copier le segment de l'URL juste " +
-    "après cette partie -- puis mettre à jour le secret " +
+    "\n\nSi tu vois des erreurs HTTP 401 ci-dessus : la clé de session " +
+    "CANAL_ACTION_PASS du Worker Cloudflare (cinemaison-canal-proxy) a " +
+    "probablement expiré -- Canal+ la fait tourner périodiquement. " +
+    "Pour la renouveler : se connecter sur canalplus.com, ouvrir les " +
+    "outils développeur (F12 > Réseau), ouvrir une fiche film, repérer " +
+    "une requête vers /actionLayout/ ou /search/, et copier le segment " +
+    "de l'URL juste après cette partie -- puis mettre à jour le secret " +
     "CANAL_ACTION_PASS du Worker dans le tableau de bord Cloudflare " +
     "(Workers & Pages > cinemaison-canal-proxy > Settings > " +
     "Variables), sans besoin de redéployer le code.\n\n" +
@@ -1516,7 +1631,7 @@ function envoyerMailAlerteAVerifierCanalV4_(nombreAVerifier, nombreNonTrouves) {
 
   MailApp.sendEmail({
     to: email,
-    subject: "CinéMaison - V2 - ALERTE CANAL+ (fiches à vérifier)",
+    subject: "CinéMaison - V2 - CANAL+ : contrôle EN COURS (fiches à vérifier)",
     body: corps
   });
 
@@ -1525,6 +1640,57 @@ function envoyerMailAlerteAVerifierCanalV4_(nombreAVerifier, nombreNonTrouves) {
     "CANAL_ALERTE_A_VERIFIER",
     "OK",
     "Alerte technique envoyée | aVerifier=" + nombreAVerifier + " | nonTrouves=" + nombreNonTrouves
+  );
+}
+
+// NOUVEAU (04/10/2026) -- bilan envoyé à chaque fin de parcours
+// complet CANAL+ (voir l'appel dans terminerControleCompletCanalV4_),
+// TOUJOURS envoyé (même sans rien à signaler, en confirmation que le
+// parcours est bien allé au bout) -- demandé par Ben. Complète
+// l'alerte envoyée en cours de route (envoyerMailAlerteAVerifierCanalV4_) :
+// celle-ci n'est qu'une photo partielle au moment où un souci est
+// d'abord détecté, alors que ce bilan-ci reflète toujours l'état
+// définitif du parcours qui vient de se terminer.
+function envoyerMailBilanFinParcoursCanalV4_(etat, sheet, h) {
+  const email = destinatairesPourService_("AlerteTechnique");
+  const LIMITE_LISTE = 40;
+
+  const { avecHttp, sansHttp } = categoriserFichesAVerifierCanalV4_(sheet, h);
+  const formaterListe_ = (liste) => formaterListeFichesCanalV4_(liste, LIMITE_LISTE);
+  const totalAVerifier = avecHttp.length + sansHttp.length;
+  const rienASignaler = totalAVerifier === 0 && Number(etat.erreurs || 0) === 0;
+
+  const corps =
+    "CinéMaison - Bilan de fin de parcours CANAL+\n\n" +
+    "✓ CONTRÔLE TERMINÉ -- parcours complet achevé, voici le bilan " +
+    "final et définitif (contrairement au mail \"EN COURS\", qui n'est " +
+    "qu'une photo partielle prise pendant le parcours).\n\n" +
+    "-- Chiffres du parcours --\n" +
+    "  Fiches traitées : " + (etat.traites || 0) + "\n" +
+    "  Dates connues trouvées : " + (etat.datesConnues || 0) + "\n" +
+    "  Plus de 6 mois : " + (etat.plusDe6Mois || 0) + "\n" +
+    "  Changements de date réels : " + (etat.changements || 0) +
+    (etat.changements > 0 ? " (voir le mail \"Modifications CANAL+\" séparé)" : "") + "\n" +
+    "  Erreurs techniques : " + (etat.erreurs || 0) + "\n\n" +
+    (rienASignaler
+      ? "Rien à signaler côté fiches \"à vérifier\" -- tout est propre."
+      : "-- Fiches actuellement \"à vérifier\" (" + totalAVerifier + ") --\n\n" +
+        "Avec une erreur HTTP détectée (" + avecHttp.length + ") :\n" +
+        formaterListe_(avecHttp) +
+        "\n\n\"Aucune date extraite\" sans erreur HTTP (" + sansHttp.length + ") :\n" +
+        formaterListe_(sansHttp));
+
+  MailApp.sendEmail({
+    to: email,
+    subject: "CinéMaison - V2 - CANAL+ : contrôle TERMINÉ" + (rienASignaler ? " (rien à signaler)" : " (" + totalAVerifier + " à vérifier)"),
+    body: corps
+  });
+
+  journal_(
+    "MAILS",
+    "CANAL_BILAN_FIN_PARCOURS",
+    "OK",
+    "Bilan envoyé | traites=" + (etat.traites || 0) + " | aVerifier=" + totalAVerifier + " | erreurs=" + (etat.erreurs || 0)
   );
 }
 
