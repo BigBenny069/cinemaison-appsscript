@@ -7,7 +7,14 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.23
+ * Version: 2.24
+ *
+ * Correctif V2.24 (07/10/2026) : nouveau rapport "CANAL+ écarts" (voir
+ * 21_CANAL_ECARTS.js) -- (1) nouvelle action doPost "rapportCanalEcarts"
+ * (bouton dans Réglages, via api/update-settings.js) ; (2)
+ * traiterAlerteSuggestionsStreamingV1_ mémorise désormais, pour CANAL+,
+ * la liste des fiches vues dans Ma Liste (champ idsVus envoyé par
+ * canal.js), AVANT les sorties anticipées RAS/anti-doublon.
  *
  * Correctif V2.23 (30/09/2026) : bug important -- traiterAlerteSuggestionsPrimeV1_
  * et traiterAlerteSuggestionsStreamingV1_ ne sauvegardaient JAMAIS le
@@ -398,6 +405,11 @@ function doPost(e) {
       return traiterRenvoyerRapportEcartsV1_(corps);
     }
 
+    // NOUVEAU (07/10/2026) -- rapport "CANAL+ écarts" (21_CANAL_ECARTS.js).
+    if (corps.action === "rapportCanalEcarts") {
+      return traiterRapportCanalEcartsV1_(corps);
+    }
+
     if (corps.action === "alerteSuggestionsPrime") {
       return traiterAlerteSuggestionsPrimeV1_(corps);
     }
@@ -652,6 +664,15 @@ function traiterRenvoyerRapportEcartsV1_(corps) {
   try {
     genererEtEnvoyerRapportEcartsV1();
     return reponseJsonWebhook_({ ok: true });
+  } catch (err) {
+    return reponseJsonWebhook_({ ok: false, error: String(err) }, 500);
+  }
+}
+
+function traiterRapportCanalEcartsV1_(corps) {
+  try {
+    const resume = genererEtEnvoyerRapportCanalEcartsV1();
+    return reponseJsonWebhook_({ ok: true, resume: resume });
   } catch (err) {
     return reponseJsonWebhook_({ ok: false, error: String(err) }, 500);
   }
@@ -962,6 +983,17 @@ function traiterAppliquerControlePrimeV1_(corps) {
  */
 function traiterAlerteSuggestionsStreamingV1_(corps) {
   const plateforme = String(corps.plateforme || "").trim();
+  // NOUVEAU (07/10/2026) -- pour CANAL+, mémorise la liste des fiches
+  // vues dans Ma Liste (utilisée par 21_CANAL_ECARTS.js). Volontairement
+  // AVANT les sorties anticipées RAS/anti-doublon ci-dessous (même piège
+  // que le correctif V2.23). Un échec ici ne doit jamais bloquer le mail.
+  if (plateforme === "CANAL+" && Array.isArray(corps.idsVus)) {
+    try {
+      enregistrerDernierScanCanalV1_(corps.idsVus);
+    } catch (err) {
+      journal_("CANAL_ECARTS", "ENREGISTRER_SCAN", "ERREUR", String(err));
+    }
+  }
   const fiches = Array.isArray(corps.fiches) ? corps.fiches : [];
   const ambiguites = Array.isArray(corps.ambiguites) ? corps.ambiguites : [];
   if (fiches.length === 0 && ambiguites.length === 0) {
