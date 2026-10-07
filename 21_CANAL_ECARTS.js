@@ -10,14 +10,7 @@
  *           disponibilité, plateforme, raison probable, et un lien
  *           "Retirer de CinéMaison" (même page de confirmation que le
  *           rapport "Écarts plateformes", api/confirm.js?page=remove).
- * Version : 1.1 (07/10/2026)
- *
- * V1.1 : deux critères ajoutés à la demande de Ben -- (1) fiches dont le
- * contrôle des dates a reçu "HTTP 404" (page du film disparue de Canal+,
- * lu dans CommentaireDisponibilite) ; (2) fiches dont la plateforme
- * contient "canal" mais n'est pas reconnue par le contrôle quotidien
- * (normalizePlatform_ n'accepte que CANAL, CANAL PLUS, CANAL+) --
- * explique l'écart 371 fiches (canal.js) / 370 traitées (contrôle).
+ * Version : 1.0 (07/10/2026)
  *
  * D'où viennent les fiches "vues" : canal.js envoie, avec son appel
  * habituel "alerteSuggestionsStreaming", la liste des ID CinéMaison
@@ -115,7 +108,7 @@ function lireDateCanalEcartsV1_(valeur) {
  *   scanUtilisable: bool, avertissement: string }
  * Chaque fiche : { id, titre, affiche, plateforme, dateFinFr, categorie,
  *   raison, aContentId }
- * categorie : "HORS_CONTROLE" | "EXPIRE" | "HTTP_404" | "ABSENT_DATE_FUTURE" | "ABSENT_SANS_DATE"
+ * categorie : "EXPIRE" | "ABSENT_DATE_FUTURE" | "ABSENT_SANS_DATE"
  */
 function calculerEcartsCanalV1_() {
   const classeur = SpreadsheetApp.getActiveSpreadsheet();
@@ -161,46 +154,30 @@ function calculerEcartsCanalV1_() {
     const date = h.DateDisponibiliteAuto !== undefined ? lireDateCanalEcartsV1_(ligne[h.DateDisponibiliteAuto]) : null;
     const dansLaListe = scanUtilisable && scan.ids[id] === true;
     const aContentId = h.CanalContentId !== undefined && String(ligne[h.CanalContentId] || "").trim() !== "";
-    const commentaire = h.CommentaireDisponibilite !== undefined ? String(ligne[h.CommentaireDisponibilite] || "") : "";
-    const statutAuto = h.StatutDisponibiliteAuto !== undefined ? String(ligne[h.StatutDisponibiliteAuto] || "").trim() : "";
-    const http404 = statutAuto === "A_VERIFIER_CANAL" && /HTTP[^0-9]{0,15}404/i.test(commentaire);
-    const horsControle = normalizePlatform_(ligne[h.Plateforme]) !== "CANAL+";
-    const expire = !!date && date.iso < aujourdHui && !dansLaListe;
-    const absent = scanUtilisable && !dansLaListe;
 
     let categorie = null;
-    const notes = [];
-    if (horsControle) {
-      categorie = "HORS_CONTROLE";
-      notes.push("Plateforme \"" + String(ligne[h.Plateforme] || "").trim() + "\" non reconnue par le contrôle quotidien des dates : cette fiche n'est jamais contrôlée.");
-    }
-    if (expire) {
+    let raison = "";
+    if (date && date.iso < aujourdHui) {
       // Date de fin strictement dépassée : même règle que le rapport
       // "Écarts plateformes" (le jour même reste valable jusqu'à 23h59).
-      // Si la fiche est pourtant encore dans Ma Liste, on ne la signale
-      // pas pour ce motif.
-      if (!categorie) categorie = "EXPIRE";
-      notes.push("Date de fin dépassée -- probablement retiré automatiquement de Canal+.");
-    }
-    if (http404) {
-      if (!categorie) categorie = "HTTP_404";
-      notes.push("Le contrôle des dates reçoit une erreur 404 : la page du film n'existe plus sur Canal+." +
-        (scanUtilisable && dansLaListe ? " Mais il figure encore dans Ma Liste : à vérifier à la main." : ""));
-    }
-    if (absent) {
-      if (expire) {
-        notes.push("Absent de Ma Liste.");
-      } else if (date) {
-        if (!categorie) categorie = "ABSENT_DATE_FUTURE";
-        notes.push("Absent de Ma Liste alors que la date de fin n'est pas atteinte (retiré à la main ? changement de chaîne ?).");
+      // Si la fiche est pourtant encore dans Ma Liste (date de fin
+      // périmée côté Sheet, Canal+ la propose toujours), on ne la
+      // signale pas.
+      if (!dansLaListe) {
+        categorie = "EXPIRE";
+        raison = "Date de fin dépassée -- probablement retiré automatiquement de Canal+.";
+      }
+    } else if (scanUtilisable && !dansLaListe) {
+      if (date) {
+        categorie = "ABSENT_DATE_FUTURE";
+        raison = "Absent de Ma Liste alors que la date de fin n'est pas atteinte (retiré à la main ? changement de chaîne ?).";
       } else {
-        if (!categorie) categorie = "ABSENT_SANS_DATE";
-        notes.push(aContentId
+        categorie = "ABSENT_SANS_DATE";
+        raison = aContentId
           ? "Absent de Ma Liste et aucune date de fin connue."
-          : "Jamais rattaché à Canal+ (pas de CanalContentId), absent de Ma Liste.");
+          : "Jamais rattaché à Canal+ (pas de CanalContentId), absent de Ma Liste.";
       }
     }
-    const raison = notes.join(" ");
     if (!categorie) return;
 
     fiches.push({
@@ -216,7 +193,7 @@ function calculerEcartsCanalV1_() {
     });
   });
 
-  const ordre = { HORS_CONTROLE: 0, EXPIRE: 1, HTTP_404: 2, ABSENT_DATE_FUTURE: 3, ABSENT_SANS_DATE: 4 };
+  const ordre = { EXPIRE: 0, ABSENT_DATE_FUTURE: 1, ABSENT_SANS_DATE: 2 };
   fiches.sort(function (a, b) {
     if (ordre[a.categorie] !== ordre[b.categorie]) return ordre[a.categorie] - ordre[b.categorie];
     return a.titre.localeCompare(b.titre, "fr");
@@ -260,9 +237,7 @@ function construireHtmlCanalEcartsV1_(resultat) {
   const esc = echapperHtmlCanalEcartsV1_;
 
   const sections = [
-    { cle: "HORS_CONTROLE", titre: "PLATEFORME NON RECONNUE PAR LE CONTRÔLE", aide: "Jamais contrôlées : corrige la colonne Plateforme (CANAL+) dans le Sheet." },
     { cle: "EXPIRE", titre: "DATE DE FIN DÉPASSÉE", aide: "Très probablement retirés par Canal+ : à retirer de CinéMaison." },
-    { cle: "HTTP_404", titre: "PAGE INTROUVABLE SUR CANAL+ (HTTP 404)", aide: "Le film n'existe plus à cette adresse : très probablement retiré de Canal+." },
     { cle: "ABSENT_DATE_FUTURE", titre: "ABSENTS DE MA LISTE (DATE PAS ENCORE ATTEINTE)", aide: "À vérifier : retirés à la main, ou passés sur une autre chaîne ?" },
     { cle: "ABSENT_SANS_DATE", titre: "ABSENTS DE MA LISTE (SANS DATE)", aide: "À vérifier : jamais ajoutés dans Ma Liste, ou titre non reconnu ?" },
   ];
