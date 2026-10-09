@@ -10,7 +10,12 @@
  *           disponibilité, plateforme, raison probable, et un lien
  *           "Retirer de CinéMaison" (même page de confirmation que le
  *           rapport "Écarts plateformes", api/confirm.js?page=remove).
- * Version : 1.1 (07/10/2026)
+ * Version : 1.2 (09/10/2026)
+ *
+ * V1.2 : le mail signale aussi les codes de chaîne présents dans
+ * CanalContentId mais absents de CANAL_CHAINES_V1 (src/App.jsx) -- à
+ * ajouter côté application avec leur logo. Liste ci-dessous à garder
+ * identique à CANAL_CHAINES_V1.
  *
  * V1.1 : deux critères ajoutés à la demande de Ben -- (1) fiches dont le
  * contrôle des dates a reçu "HTTP 404" (page du film disparue de Canal+,
@@ -39,6 +44,15 @@
  */
 
 const CANAL_ECARTS_FEUILLE_V1 = "CANAL_ECARTS";
+// Codes de chaîne déjà référencés dans l'application (CANAL_CHAINES_V1).
+const CANAL_CHAINES_CONNUES_V1 = {
+  "50001": "CANAL+", "50002": "CINÉ+OCS", "50007": "ACTION", "50008": "ARTE",
+  "50016": "COMÉDIE+", "50026": "FRANCE.TV", "50035": "M6/M6+", "50049": "PARIS PREMIÈRE",
+  "50052": "RTL9", "50055": "SÉRIE CLUB", "50060": "TÉVA", "50061": "MYTF1",
+  "50071": "W9", "50076": "POLAR+", "50254": "CANAL+ SÉRIES", "50662": "PARAMOUNT+",
+  "50696": "APPLE TV", "50780": "INSOMNIA", "50889": "HBO MAX", "50943": "NOVO19",
+  "40099": "CANAL VOD"
+};
 const CANAL_DERNIER_SCAN_FEUILLE_V1 = "CANAL_DERNIER_SCAN";
 // Si le dernier scan reconnaît moins de fiches que cette part du
 // total CANAL+ de CinéMaison, on le juge suspect (scan interrompu,
@@ -155,6 +169,19 @@ function calculerEcartsCanalV1_() {
       " : jugé incomplet, donc les fiches \"absentes de Ma Liste\" ne sont pas signalées (seules les dates dépassées le sont).";
   }
 
+  // Codes de chaîne inconnus de l'application
+  const codesInconnus = {};
+  if (h.CanalContentId !== undefined) {
+    fichesCanal.forEach(function (ligne) {
+      const cid = String(ligne[h.CanalContentId] || "").trim();
+      if (cid.indexOf("_") === -1) return;
+      const code = cid.split("_").pop();
+      if (!code || CANAL_CHAINES_CONNUES_V1[code]) return;
+      if (!codesInconnus[code]) codesInconnus[code] = [];
+      codesInconnus[code].push(String(ligne[h.ID]).trim() + " " + String(ligne[h.Titre]).trim());
+    });
+  }
+
   const fiches = [];
   fichesCanal.forEach(function (ligne) {
     const id = String(ligne[h.ID]).trim();
@@ -228,6 +255,7 @@ function calculerEcartsCanalV1_() {
     scan: scan,
     scanUtilisable: scanUtilisable,
     avertissement: avertissement,
+    codesInconnus: codesInconnus,
   };
 }
 
@@ -299,6 +327,16 @@ function construireHtmlCanalEcartsV1_(resultat) {
       '</table></div>';
   }).join("");
 
+  const codes = Object.keys(resultat.codesInconnus || {});
+  const blocCodes = codes.length === 0 ? "" :
+    '<div style="margin-top:22px;padding:10px 12px;background:#EEF3F8;border-radius:6px;font-size:12px;color:#2B4256;font-family:Arial,sans-serif;line-height:1.6">' +
+    '<strong>Nouveau(x) code(s) de chaîne à ajouter dans l\'application (logo) :</strong><br>' +
+    codes.map(function (c) {
+      const l = resultat.codesInconnus[c];
+      return 'Code <strong>' + esc(c) + '</strong> (' + l.length + ' fiche' + (l.length > 1 ? 's' : '') + ') : ' +
+        esc(l.slice(0, 4).join(" ; ")) + (l.length > 4 ? " ..." : "");
+    }).join('<br>') + '</div>';
+
   const scanTexte = resultat.scan
     ? resultat.scan.nombre + ' fiche(s) vues dans Ma Liste' +
       (resultat.scan.dateScan ? ' (scan du ' + Utilities.formatDate(resultat.scan.dateScan, Session.getScriptTimeZone(), "dd/MM/yyyy") + ')' : '')
@@ -322,7 +360,7 @@ function construireHtmlCanalEcartsV1_(resultat) {
     '<div style="font-size:22px;font-weight:bold;color:#3A2E22">CINÉ<span style="color:#B5622B">MAISON</span></div>' +
     '<div style="font-size:11px;letter-spacing:1.5px;color:#B5622B;margin-top:4px;font-family:Arial,sans-serif">CANAL+ &middot; ÉCARTS AVEC MA LISTE</div>' +
     '<div style="border-top:1px solid #E3D9C4;margin:16px 0"></div>' +
-    resume + blocs +
+    resume + blocs + blocCodes +
     '</div></div></body></html>'
   );
 }
@@ -349,7 +387,7 @@ function genererEtEnvoyerRapportCanalEcartsV1() {
 
   journal_(
     "CANAL_ECARTS", "RAPPORT", destinataires ? "OK" : "IGNORE_SANS_DESTINATAIRE",
-    "A examiner=" + nombre + " | Total CANAL+=" + resultat.totalCanal +
+    "Codes chaîne inconnus=" + Object.keys(resultat.codesInconnus || {}).join(",") + " | A examiner=" + nombre + " | Total CANAL+=" + resultat.totalCanal +
     " | Scan=" + (resultat.scan ? resultat.scan.nombre : "aucun") +
     (resultat.avertissement ? " | " + resultat.avertissement : "")
   );
