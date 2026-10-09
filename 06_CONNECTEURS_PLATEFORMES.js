@@ -3,10 +3,22 @@
  * CinéMaison V4
  * Script : 06_CONNECTEURS_PLATEFORMES.gs
  * Rôle   : Connecteurs plateformes — CANAL+ uniquement
- * Version: 4.8.2
+ * Version: 4.8.3
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs,
  *               Worker Cloudflare CANAL+ V3.6
  * ============================================================
+ *
+ * Correctif V4.8.3 (09/10/2026) : détection AUTOMATIQUE de la VOD.
+ * Chaque CanalContentId se termine par un code de chaîne (ex.
+ * 604707_50002 = CINE+OCS, 27350190_40099 = CANAL VOD) ; le code
+ * _40099 identifie à coup sûr Canal VOD (constaté sur "Ma Liste" et sur
+ * les fiches Rocky V / Boy Kills World). Une fiche dont CanalContentId
+ * se termine par _40099, sans date de fin ni erreur HTTP, est donc
+ * classée VOD_SANS_DATE ET sa colonne StatutAcces passe automatiquement
+ * à "VOD" si elle ne l'était pas. Aucun changement côté canal.js : il
+ * écrit déjà le bon CanalContentId à chaque run (à lancer AVANT le
+ * contrôle des dates). reclasserVodSansDateCanalV1() utilise aussi ce
+ * code.
  *
  * Correctif V4.8.2 (09/10/2026) : une fiche marquée VOD (colonne
  * StatutAcces) pour laquelle Canal+ n'affiche aucune date de fin ET
@@ -961,6 +973,13 @@ function traiterIndicesCanalV41_(sheet, data, h, indices, mode) {
  * NOUVEAU (V4.8.2) -- true si StatutAcces désigne une VOD ("VOD", "Vod",
  * "vod ..."). Insensible à la casse et aux espaces.
  */
+// Code de chaîne Canal VOD à la fin d'un CanalContentId.
+const CANAL_SUFFIXE_VOD_V1 = "_40099";
+
+function estContentIdVodCanalV1_(contentId) {
+  return String(contentId || "").trim().slice(-CANAL_SUFFIXE_VOD_V1.length) === CANAL_SUFFIXE_VOD_V1;
+}
+
 function estStatutAccesVodCanalV1_(valeur) {
   return /^vod\b/i.test(String(valeur || "").trim());
 }
@@ -986,7 +1005,11 @@ function reclasserVodSansDateCanalV1() {
     if (String(ligne[h.StatutDisponibiliteAuto] || "") !== "A_VERIFIER_CANAL") continue;
     const commentaire = String(ligne[h.CommentaireDisponibilite] || "");
     if (/HTTP/i.test(commentaire)) continue;
-    if (estStatutAccesVodCanalV1_(ligne[h.StatutAcces])) {
+    const vodParId = estContentIdVodCanalV1_(ligne[h.CanalContentId]);
+    if (estStatutAccesVodCanalV1_(ligne[h.StatutAcces]) || vodParId) {
+      if (vodParId && !estStatutAccesVodCanalV1_(ligne[h.StatutAcces])) {
+        setProtected_(sheet, i + 1, h, "StatutAcces", "VOD", { force: true });
+      }
       setProtected_(sheet, i + 1, h, "StatutDisponibiliteAuto", "VOD_SANS_DATE", { force: true });
       setProtected_(
         sheet, i + 1, h, "CommentaireDisponibilite",
@@ -995,7 +1018,7 @@ function reclasserVodSansDateCanalV1() {
       );
       reclassees++;
     } else {
-      restantes.push(String(ligne[h.Titre] || "") + " (StatutAcces=" + String(ligne[h.StatutAcces] || "vide") + ")");
+      restantes.push(String(ligne[h.Titre] || "") + " (StatutAcces=" + String(ligne[h.StatutAcces] || "vide") + ", CanalContentId=" + String(ligne[h.CanalContentId] || "vide") + ")");
     }
   }
 
@@ -1339,10 +1362,18 @@ function controleCanalLigneV4_(sheet, rowNumber, row, h) {
   // NOUVEAU (V4.8.2) -- VOD (location/achat à l'unité) : pas de date de
   // fin chez Canal+, donc "aucune date extraite" est le résultat NORMAL,
   // pas un souci. Uniquement s'il n'y a aucune trace d'erreur HTTP.
+  const vodParId = estContentIdVodCanalV1_(canalId);
   if (
-    estStatutAccesVodCanalV1_(get_(row, h, "StatutAcces")) &&
+    (estStatutAccesVodCanalV1_(get_(row, h, "StatutAcces")) || vodParId) &&
     !/HTTP/i.test(String(commentaireApi || "") + " " + String(texteOriginal || ""))
   ) {
+    // V4.8.3 : code chaîne VOD dans le CanalContentId -> StatutAcces
+    // renseigné automatiquement (jamais l'inverse : on ne retire pas un
+    // "VOD" posé à la main).
+    if (vodParId && !estStatutAccesVodCanalV1_(get_(row, h, "StatutAcces"))) {
+      setProtected_(sheet, rowNumber, h, "StatutAcces", "VOD", { force: true });
+    }
+
     setProtected_(
       sheet,
       rowNumber,
