@@ -3,8 +3,23 @@
  * CinéMaison V4
  * Script  : 11_CONTROLE_PRIME_OFFICIEL.gs
  * Rôle    : Diagnostic et import sécurisé des résultats Prime Video officiels
- * Version : 1.8 (30/09/2026)
+ * Version : 1.9 (09/10/2026)
  * ============================================================
+ *
+ * Correctif V1.9 (09/10/2026) : une fiche Prime détectée en ABONNEMENT
+ * COMPLÉMENTAIRE ou en VOD voit maintenant sa date de fin automatique
+ * EFFACÉE (DateDisponibiliteAuto + source + statuts), au lieu de la
+ * "conserver" comme pour AUCUNE_ALERTE. Cas signalé par Ben : "Le Retour
+ * des morts-vivants 3", inclus dans l'abonnement jusqu'au 05/10/2026
+ * puis passé en ABO+ -- la vieille date restait écrite, la fiche
+ * partait en Archives et n'apparaissait donc jamais dans le menu
+ * Abonnement complémentaire. Seule une date dont la source est Prime
+ * (ou vide) est effacée ; une date d'une autre source protégée, ou la
+ * date MANUELLE, n'est jamais touchée. S'applique à chaque contrôle (pas
+ * seulement au moment du changement), donc rattrape aussi les fiches
+ * déjà passées en ABO+/VOD avec une date périmée. Voir aussi
+ * apercuNettoyageDatesAboVodPrimeV1 / nettoyerDatesAboVodPrimeV1 pour un
+ * nettoyage immédiat sans attendre un contrôle.
  *
  * Correctif V1.8 (30/09/2026) : les deux blocs de dates validées
  * (arrivée et retrait) transmettent maintenant dateRetraitAvant au
@@ -289,6 +304,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
   let controlesValides = 0;
   let datesValidees = 0;
   let sansAlerte = 0;
+  let datesEffacees = 0;
   let ignores = 0;
   let erreurs = 0;
   let conflitsProteges = 0;
@@ -409,6 +425,31 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
     }
 
 
+    // NOUVEAU (V1.9) -- ABO+/VOD : la date de fin automatique n'a plus de
+    // sens (le film n'est plus dans l'abonnement) -> effacée, si elle
+    // vient de Prime ou n'a pas de source. Jamais la date manuelle ni une
+    // date d'une autre source protégée.
+    function effacerDateAutoSiAboOuVod_() {
+      if (statutPrimeDetecte !== "ABONNEMENT_COMPLEMENTAIRE" && statutPrimeDetecte !== "VOD") return;
+      const dateAuto = film.valeurs[hFilms.DateDisponibiliteAuto];
+      if (!dateAuto) return;
+      const sourceAuto = String(film.valeurs[hFilms.SourceDisponibiliteAuto] || "").trim();
+      if (sourceAuto && !estSourcePrimeV110_(sourceAuto)) {
+        Logger.log("  [DATE CONSERVÉE] " + idFilm + " : source " + sourceAuto + " protégée, date non effacée.");
+        return;
+      }
+      ecrireChampPrimeV110_(films, film.ligne, hFilms, "DateDisponibiliteAuto", "");
+      ecrireChampPrimeV110_(films, film.ligne, hFilms, "SourceDisponibiliteAuto", "");
+      ecrireChampPrimeV110_(films, film.ligne, hFilms, "StatutDisponibiliteAuto", "");
+      ecrireChampPrimeV110_(films, film.ligne, hFilms, "StatutDisponibilite", "");
+      ecrireChampPrimeV110_(films, film.ligne, hFilms, "CommentaireDisponibilite",
+        "Prime Video : fiche passée en " + (statutPrimeDetecte === "VOD" ? "VOD" : "abonnement complémentaire") +
+        " -- date de fin automatique effacée le " + formaterDatePrimeV110_(maintenant));
+      datesEffacees++;
+      Logger.log("  [DATE EFFACÉE] " + idFilm + " : ancienne date " + libelleDateSecurisePrimeV1_(dateAuto) +
+        " (statut Prime " + statutPrimeDetecte + ")");
+    }
+
     const plateformesAvant = String(
       film.valeurs[hFilms.PlateformesDetectees] || ""
     ).trim();
@@ -435,6 +476,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
             "PlateformesDetectees", plateformesApres);
         }
         ecrireStatutAccesSiBesoin_();
+        effacerDateAutoSiAboOuVod_();
       }
       continue;
     }
@@ -680,6 +722,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
   Logger.log("Contrôles valides : " + controlesValides);
   Logger.log("Dates validées : " + datesValidees);
   Logger.log("Sans alerte : " + sansAlerte);
+  Logger.log("Dates effacées (ABO+/VOD) : " + datesEffacees);
   Logger.log("Conflits d'autre source protégés : " + conflitsProteges);
   Logger.log("Ajouts PRIME aux plateformes : " + ajoutsPlateforme);
   Logger.log("Changements de date : " + changements);
@@ -693,6 +736,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
     controlesValides: controlesValides,
     datesValidees: datesValidees,
     sansAlerte: sansAlerte,
+    datesEffacees: datesEffacees,
     conflitsProteges: conflitsProteges,
     ajoutsPlateforme: ajoutsPlateforme,
     changements: changements,
@@ -1069,3 +1113,74 @@ function indexEntetesPrimeV110_(entetes) {
 
 
 
+
+
+
+/**
+ * NOUVEAU (V1.9) -- nettoyage immédiat des fiches PRIME déjà en
+ * "Abonnement complémentaire" ou "VOD" qui gardent une date de fin
+ * automatique périmée. À lancer depuis l'éditeur Apps Script (pas de
+ * redéploiement). apercuNettoyageDatesAboVodPrimeV1 : lecture seule,
+ * liste ce qui serait effacé. nettoyerDatesAboVodPrimeV1 : efface.
+ */
+function apercuNettoyageDatesAboVodPrimeV1() {
+  return nettoyageDatesAboVodPrimeV1_(false);
+}
+
+function nettoyerDatesAboVodPrimeV1() {
+  return nettoyageDatesAboVodPrimeV1_(true);
+}
+
+function nettoyageDatesAboVodPrimeV1_(ecrire) {
+  const films = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Films");
+  const donnees = films.getDataRange().getValues();
+  const h = indexEntetesPrimeV110_(donnees[0]);
+  ["ID", "Titre", "Plateforme", "StatutAcces", "DateDisponibiliteAuto", "SourceDisponibiliteAuto"].forEach(function (nom) {
+    if (h[nom] === undefined) throw new Error("Colonne Films manquante : " + nom);
+  });
+
+  const concernees = [];
+  const protegees = [];
+  for (let i = 1; i < donnees.length; i++) {
+    const ligne = donnees[i];
+    if (!estPrimeVideoV110_(ligne[h.Plateforme])) continue;
+    const statutAcces = String(ligne[h.StatutAcces] || "").trim();
+    if (statutAcces !== "Abonnement complémentaire" && statutAcces !== "VOD") continue;
+    if (!ligne[h.DateDisponibiliteAuto]) continue;
+    const source = String(ligne[h.SourceDisponibiliteAuto] || "").trim();
+    const libelle = String(ligne[h.ID]) + " " + String(ligne[h.Titre]) + " (" + statutAcces + ", date " +
+      libelleDateSecurisePrimeV1_(ligne[h.DateDisponibiliteAuto]) + ", source " + (source || "vide") + ")";
+    if (source && !estSourcePrimeV110_(source)) {
+      protegees.push(libelle);
+      continue;
+    }
+    concernees.push({ ligne: i + 1, libelle: libelle, statutAcces: statutAcces });
+  }
+
+  concernees.forEach(function (c) {
+    if (ecrire) {
+      ecrireChampPrimeV110_(films, c.ligne, h, "DateDisponibiliteAuto", "");
+      ["SourceDisponibiliteAuto", "StatutDisponibiliteAuto", "StatutDisponibilite"].forEach(function (nom) {
+        if (h[nom] !== undefined) ecrireChampPrimeV110_(films, c.ligne, h, nom, "");
+      });
+      if (h.CommentaireDisponibilite !== undefined) {
+        ecrireChampPrimeV110_(films, c.ligne, h, "CommentaireDisponibilite",
+          "Prime Video : fiche en " + c.statutAcces + " -- date de fin automatique effacée (nettoyage)");
+      }
+    }
+    Logger.log((ecrire ? "EFFACÉE : " : "À EFFACER : ") + c.libelle);
+  });
+  protegees.forEach(function (p) { Logger.log("CONSERVÉE (autre source) : " + p); });
+  Logger.log((ecrire ? "Dates effacées : " : "Dates qui seraient effacées : ") + concernees.length +
+    " | conservées (autre source) : " + protegees.length);
+  return { effacees: ecrire ? concernees.length : 0, aEffacer: concernees.length, protegees: protegees.length };
+}
+
+
+/** Date de cellule (Date ou texte) -> texte lisible, sans jamais planter. */
+function libelleDateSecurisePrimeV1_(valeur) {
+  if (Object.prototype.toString.call(valeur) === "[object Date]" && !isNaN(valeur.getTime())) {
+    return Utilities.formatDate(valeur, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+  return String(valeur);
+}
