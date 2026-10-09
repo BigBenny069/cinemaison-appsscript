@@ -3,10 +3,21 @@
  * CinéMaison V4
  * Script : 06_CONNECTEURS_PLATEFORMES.gs
  * Rôle   : Connecteurs plateformes — CANAL+ uniquement
- * Version: 4.8.1
+ * Version: 4.8.2
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs,
  *               Worker Cloudflare CANAL+ V3.6
  * ============================================================
+ *
+ * Correctif V4.8.2 (09/10/2026) : une fiche marquée VOD (colonne
+ * StatutAcces) pour laquelle Canal+ n'affiche aucune date de fin ET
+ * sans erreur HTTP n'est plus classée "à vérifier" -- c'est normal, une
+ * location/achat à l'unité n'a pas de date de fin. Nouveau statut
+ * VOD_SANS_DATE (commentaire explicatif), nouveau compteur "VOD sans date
+ * de fin" dans le bilan de fin de parcours, et une fonction à lancer une
+ * fois depuis l'éditeur, reclasserVodSansDateCanalV1(), qui reclasse tout
+ * de suite les fiches déjà en A_VERIFIER_CANAL sans attendre le prochain
+ * contrôle complet. Une fiche VOD avec une vraie erreur HTTP reste
+ * signalée.
  *
  * Correctif V4.8.1 (04/10/2026) : nouveau mail de bilan envoyé à
  * CHAQUE fin de parcours complet CANAL+ (même sans rien à signaler,
@@ -268,6 +279,7 @@ function demarrerControleCompletCanalV4() {
     plusDe6Mois: 0,
     aVerifier: 0,
     nonTrouves: 0,
+    vodSansDate: 0,
     erreurs: 0,
     changements: 0,
     modifications: []
@@ -376,6 +388,8 @@ function continuerControleCompletCanalV4() {
       Number(etat.aVerifier || 0) + resultat.stats.aVerifier;
     etat.nonTrouves =
       Number(etat.nonTrouves || 0) + (resultat.stats.nonTrouves || 0);
+    etat.vodSansDate =
+      Number(etat.vodSansDate || 0) + (resultat.stats.vodSansDate || 0);
     etat.erreurs =
       Number(etat.erreurs || 0) + resultat.stats.erreurs;
     etat.changements =
@@ -880,6 +894,8 @@ function traiterIndicesCanalV41_(sheet, data, h, indices, mode) {
         stats.plusDe6Mois++;
       } else if (result.statut === "A_VERIFIER_CANAL") {
         stats.aVerifier++;
+      } else if (result.statut === "VOD_SANS_DATE") {
+        stats.vodSansDate++;
       } else if (result.statut === "NON_TROUVE_CANAL") {
         // Correctif V4.7.4 : compté séparément, jamais dans stats.erreurs
         // -- voir appliquerNonTrouveCanalV4_.
@@ -941,6 +957,56 @@ function traiterIndicesCanalV41_(sheet, data, h, indices, mode) {
 
 
 
+/**
+ * NOUVEAU (V4.8.2) -- true si StatutAcces désigne une VOD ("VOD", "Vod",
+ * "vod ..."). Insensible à la casse et aux espaces.
+ */
+function estStatutAccesVodCanalV1_(valeur) {
+  return /^vod\b/i.test(String(valeur || "").trim());
+}
+
+
+/**
+ * NOUVEAU (V4.8.2) -- À LANCER UNE FOIS depuis l'éditeur Apps Script
+ * (pas besoin de redéployer) : reclasse tout de suite les fiches déjà
+ * en A_VERIFIER_CANAL "aucune date extraite" sans erreur HTTP dont
+ * StatutAcces est VOD, sans attendre le prochain contrôle complet.
+ * Journalise aussi les fiches restantes (non marquées VOD) pour que tu
+ * voies lesquelles il faudrait marquer VOD dans l'application.
+ */
+function reclasserVodSansDateCanalV1() {
+  const sheet = getSheet_(SHEETS.FILMS);
+  const data = sheet.getDataRange().getValues();
+  const h = headers_(data[0]);
+  let reclassees = 0;
+  const restantes = [];
+
+  for (let i = 1; i < data.length; i++) {
+    const ligne = data[i];
+    if (String(ligne[h.StatutDisponibiliteAuto] || "") !== "A_VERIFIER_CANAL") continue;
+    const commentaire = String(ligne[h.CommentaireDisponibilite] || "");
+    if (/HTTP/i.test(commentaire)) continue;
+    if (estStatutAccesVodCanalV1_(ligne[h.StatutAcces])) {
+      setProtected_(sheet, i + 1, h, "StatutDisponibiliteAuto", "VOD_SANS_DATE", { force: true });
+      setProtected_(
+        sheet, i + 1, h, "CommentaireDisponibilite",
+        "CANAL+ VOD : pas de date de fin (location/achat à l'unité), rien à vérifier",
+        { force: true }
+      );
+      reclassees++;
+    } else {
+      restantes.push(String(ligne[h.Titre] || "") + " (StatutAcces=" + String(ligne[h.StatutAcces] || "vide") + ")");
+    }
+  }
+
+  Logger.log("reclasserVodSansDateCanalV1 : " + reclassees + " fiche(s) reclassée(s) VOD_SANS_DATE.");
+  Logger.log("Restent à vérifier sans erreur HTTP, NON marquées VOD (" + restantes.length + ") : " + restantes.join(" | "));
+  return { reclassees: reclassees, restantes: restantes };
+}
+
+
+
+
 function creerStatsCanalV41_() {
   return {
     traites: 0,
@@ -948,6 +1014,7 @@ function creerStatsCanalV41_() {
     plusDe6Mois: 0,
     aVerifier: 0,
     nonTrouves: 0,
+    vodSansDate: 0,
     erreurs: 0,
     changements: 0
   };
@@ -1265,6 +1332,38 @@ function controleCanalLigneV4_(sheet, rowNumber, row, h) {
       // reste intacte : ce cas ne doit donc pas alimenter le mail.
       changement: false,
       changementStatut: changementStatut
+    };
+  }
+
+
+  // NOUVEAU (V4.8.2) -- VOD (location/achat à l'unité) : pas de date de
+  // fin chez Canal+, donc "aucune date extraite" est le résultat NORMAL,
+  // pas un souci. Uniquement s'il n'y a aucune trace d'erreur HTTP.
+  if (
+    estStatutAccesVodCanalV1_(get_(row, h, "StatutAcces")) &&
+    !/HTTP/i.test(String(commentaireApi || "") + " " + String(texteOriginal || ""))
+  ) {
+    setProtected_(
+      sheet,
+      rowNumber,
+      h,
+      "StatutDisponibiliteAuto",
+      "VOD_SANS_DATE",
+      { force: true }
+    );
+
+    setProtected_(
+      sheet,
+      rowNumber,
+      h,
+      "CommentaireDisponibilite",
+      "CANAL+ VOD : pas de date de fin (location/achat à l'unité), rien à vérifier",
+      { force: true }
+    );
+
+    return {
+      statut: "VOD_SANS_DATE",
+      changement: false
     };
   }
 
@@ -1669,6 +1768,7 @@ function envoyerMailBilanFinParcoursCanalV4_(etat, sheet, h) {
     "  Fiches traitées : " + (etat.traites || 0) + "\n" +
     "  Dates connues trouvées : " + (etat.datesConnues || 0) + "\n" +
     "  Plus de 6 mois : " + (etat.plusDe6Mois || 0) + "\n" +
+    "  VOD sans date de fin (normal) : " + (etat.vodSansDate || 0) + "\n" +
     "  Changements de date réels : " + (etat.changements || 0) +
     (etat.changements > 0 ? " (voir le mail \"Modifications CANAL+\" séparé)" : "") + "\n" +
     "  Erreurs techniques : " + (etat.erreurs || 0) + "\n\n" +
@@ -1678,7 +1778,10 @@ function envoyerMailBilanFinParcoursCanalV4_(etat, sheet, h) {
         "Avec une erreur HTTP détectée (" + avecHttp.length + ") :\n" +
         formaterListe_(avecHttp) +
         "\n\n\"Aucune date extraite\" sans erreur HTTP (" + sansHttp.length + ") :\n" +
-        formaterListe_(sansHttp));
+        formaterListe_(sansHttp) +
+        (sansHttp.length > 0
+          ? "\n(Si ce sont des VOD, passe leur statut d'accès sur VOD dans l'application : elles ne remonteront plus ici.)"
+          : ""));
 
   MailApp.sendEmail({
     to: email,
