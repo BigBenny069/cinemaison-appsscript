@@ -3,8 +3,16 @@
  * CinéMaison V4
  * Script  : 11_CONTROLE_PRIME_OFFICIEL.gs
  * Rôle    : Diagnostic et import sécurisé des résultats Prime Video officiels
- * Version : 1.9 (09/10/2026)
+ * Version : 1.10 (09/10/2026)
  * ============================================================
+ *
+ * Correctif V1.10 (09/10/2026) : même principe pour une fiche détectée
+ * INCLUS (toujours dans l'abonnement) dont la date de fin automatique est
+ * STRICTEMENT dépassée : la date est effacée (même garde-fous que V1.9 :
+ * source Prime ou vide uniquement, date manuelle jamais touchée). Cas
+ * signalé par Ben : "Candyman" restait en Archives avec une date au
+ * 30/09 alors qu'il est toujours sur Prime, sans date. Une date future
+ * n'est jamais effacée.
  *
  * Correctif V1.9 (09/10/2026) : une fiche Prime détectée en ABONNEMENT
  * COMPLÉMENTAIRE ou en VOD voit maintenant sa date de fin automatique
@@ -430,7 +438,10 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
     // vient de Prime ou n'a pas de source. Jamais la date manuelle ni une
     // date d'une autre source protégée.
     function effacerDateAutoSiAboOuVod_() {
-      if (statutPrimeDetecte !== "ABONNEMENT_COMPLEMENTAIRE" && statutPrimeDetecte !== "VOD") return;
+      const aboOuVod = statutPrimeDetecte === "ABONNEMENT_COMPLEMENTAIRE" || statutPrimeDetecte === "VOD";
+      const inclusDatePerimee = statutPrimeDetecte === "INCLUS" &&
+        dateAutoStrictementPasseePrimeV1_(film.valeurs[hFilms.DateDisponibiliteAuto]);
+      if (!aboOuVod && !inclusDatePerimee) return;
       const dateAuto = film.valeurs[hFilms.DateDisponibiliteAuto];
       if (!dateAuto) return;
       const sourceAuto = String(film.valeurs[hFilms.SourceDisponibiliteAuto] || "").trim();
@@ -443,8 +454,11 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
       ecrireChampPrimeV110_(films, film.ligne, hFilms, "StatutDisponibiliteAuto", "");
       ecrireChampPrimeV110_(films, film.ligne, hFilms, "StatutDisponibilite", "");
       ecrireChampPrimeV110_(films, film.ligne, hFilms, "CommentaireDisponibilite",
-        "Prime Video : fiche passée en " + (statutPrimeDetecte === "VOD" ? "VOD" : "abonnement complémentaire") +
-        " -- date de fin automatique effacée le " + formaterDatePrimeV110_(maintenant));
+        statutPrimeDetecte === "INCLUS"
+          ? "Prime Video : toujours disponible, ancienne date de fin dépassée (" + libelleDateSecurisePrimeV1_(dateAuto) +
+            ") effacée le " + formaterDatePrimeV110_(maintenant)
+          : "Prime Video : fiche passée en " + (statutPrimeDetecte === "VOD" ? "VOD" : "abonnement complémentaire") +
+            " -- date de fin automatique effacée le " + formaterDatePrimeV110_(maintenant));
       datesEffacees++;
       Logger.log("  [DATE EFFACÉE] " + idFilm + " : ancienne date " + libelleDateSecurisePrimeV1_(dateAuto) +
         " (statut Prime " + statutPrimeDetecte + ")");
@@ -1183,4 +1197,26 @@ function libelleDateSecurisePrimeV1_(valeur) {
     return Utilities.formatDate(valeur, Session.getScriptTimeZone(), "yyyy-MM-dd");
   }
   return String(valeur);
+}
+
+
+/** true si la date de cellule (Date, yyyy-mm-dd ou dd/mm/yyyy) est un jour STRICTEMENT avant aujourd'hui. */
+function dateAutoStrictementPasseePrimeV1_(valeur) {
+  if (!valeur) return false;
+  const fuseau = Session.getScriptTimeZone();
+  const aujourdHui = Utilities.formatDate(new Date(), fuseau, "yyyy-MM-dd");
+  let iso = null;
+  if (Object.prototype.toString.call(valeur) === "[object Date]") {
+    if (isNaN(valeur.getTime())) return false;
+    iso = Utilities.formatDate(valeur, fuseau, "yyyy-MM-dd");
+  } else {
+    const t = String(valeur).trim();
+    let m = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) iso = m[0];
+    else {
+      m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      if (m) iso = m[3] + "-" + ("0" + m[2]).slice(-2) + "-" + ("0" + m[1]).slice(-2);
+    }
+  }
+  return !!iso && iso < aujourdHui;
 }
