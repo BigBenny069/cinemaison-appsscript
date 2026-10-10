@@ -7,7 +7,7 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.25
+ * Version: 2.26
  *
  * Correctif V2.25 (09/10/2026) : le rapport "CANAL+ écarts" (21_CANAL_ECARTS.js)
  * est envoyé automatiquement après chaque scan Canal+ (canal.js), en plus
@@ -1000,12 +1000,21 @@ function traiterAlerteSuggestionsStreamingV1_(corps) {
     // V2.25 -- envoie AUTOMATIQUEMENT le rapport "CANAL+ écarts" juste
     // après chaque scan Canal+ (fiches absentes de Ma Liste, 404, dates
     // dépassées...). Anti-doublon : canal.js peut réessayer l'appel.
-    try {
-      if (!dejaTraiteRecemment_("rapportCanalEcartsAuto")) {
-        genererEtEnvoyerRapportCanalEcartsV1();
+    // V2.26 -- jusqu'à 3 essais : le 10/10/2026 un "Expiration du délai
+    // de connexion au service Feuilles de calcul" (erreur passagère de
+    // Google, à un moment où d'autres déclencheurs tournaient) a fait
+    // perdre le mail. Un nouvel essai quelques secondes plus tard suffit.
+    if (!dejaTraiteRecemment_("rapportCanalEcartsAuto")) {
+      for (let essai = 1; essai <= 3; essai++) {
+        try {
+          genererEtEnvoyerRapportCanalEcartsV1();
+          break;
+        } catch (err) {
+          journal_("CANAL_ECARTS", "RAPPORT_AUTO", essai < 3 ? "ERREUR_NOUVEL_ESSAI" : "ERREUR",
+            "Essai " + essai + "/3 : " + String(err));
+          if (essai < 3) Utilities.sleep(4000 * essai);
+        }
       }
-    } catch (err) {
-      journal_("CANAL_ECARTS", "RAPPORT_AUTO", "ERREUR", String(err));
     }
   }
   const fiches = Array.isArray(corps.fiches) ? corps.fiches : [];
