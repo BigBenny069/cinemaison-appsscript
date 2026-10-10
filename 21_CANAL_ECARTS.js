@@ -10,7 +10,19 @@
  *           disponibilité, plateforme, raison probable, et un lien
  *           "Retirer de CinéMaison" (même page de confirmation que le
  *           rapport "Écarts plateformes", api/confirm.js?page=remove).
- * Version : 1.2 (09/10/2026)
+ * Version : 1.4 (10/10/2026)
+ *
+ * V1.4 : le mail propose, sur les fiches "absentes de Ma Liste", un lien
+ * "Garder hors de Ma Liste" (api/confirm?page=horsListeCanal) qui écrit "oui"
+ * dans HorsListeCanal (via api/update-film) sur clic humain.
+ *
+ * V1.3 : colonne optionnelle HorsListeCanal dans l'onglet Films. Écrire
+ * "oui" sur une fiche CANAL+ que Ben garde VOLONTAIREMENT hors de Ma
+ * Liste Canal+ (liste pleine) : elle passe dans une section grisée en
+ * bas du mail, sans lien de retrait, et n'est plus comptée dans "à
+ * examiner". Elle remonte quand même normalement en haut du mail si sa
+ * date de fin est dépassée ou si sa page Canal+ renvoie HTTP 404.
+ * Sans la colonne, rien ne change.
  *
  * V1.2 : le mail signale aussi les codes de chaîne présents dans
  * CanalContentId mais absents de CANAL_CHAINES_V1 (src/App.jsx) -- à
@@ -194,6 +206,8 @@ function calculerEcartsCanalV1_() {
     const horsControle = normalizePlatform_(ligne[h.Plateforme]) !== "CANAL+";
     const expire = !!date && date.iso < aujourdHui && !dansLaListe;
     const absent = scanUtilisable && !dansLaListe;
+    const valeurHors = h.HorsListeCanal !== undefined ? String(ligne[h.HorsListeCanal] || "").trim().toLowerCase() : "";
+    const horsListeVolontaire = ["oui", "o", "x", "1", "true", "vrai", "yes"].indexOf(valeurHors) !== -1;
 
     let categorie = null;
     const notes = [];
@@ -227,6 +241,15 @@ function calculerEcartsCanalV1_() {
           : "Jamais rattaché à Canal+ (pas de CanalContentId), absent de Ma Liste.");
       }
     }
+    if (horsListeVolontaire) {
+      if (categorie === "ABSENT_DATE_FUTURE" || categorie === "ABSENT_SANS_DATE") {
+        categorie = "HORS_LISTE_VOLONTAIRE";
+        notes.length = 0;
+        notes.push("Gardée volontairement hors de Ma Liste Canal+ (colonne HorsListeCanal) ; date de fin pas atteinte, aucune erreur détectée.");
+      } else if (categorie) {
+        notes.push("(Marquée hors liste volontaire, mais signalée pour le motif ci-dessus.)");
+      }
+    }
     const raison = notes.join(" ");
     if (!categorie) return;
 
@@ -243,7 +266,7 @@ function calculerEcartsCanalV1_() {
     });
   });
 
-  const ordre = { HORS_CONTROLE: 0, EXPIRE: 1, HTTP_404: 2, ABSENT_DATE_FUTURE: 3, ABSENT_SANS_DATE: 4 };
+  const ordre = { HORS_CONTROLE: 0, EXPIRE: 1, HTTP_404: 2, ABSENT_DATE_FUTURE: 3, ABSENT_SANS_DATE: 4, HORS_LISTE_VOLONTAIRE: 5 };
   fiches.sort(function (a, b) {
     if (ordre[a.categorie] !== ordre[b.categorie]) return ordre[a.categorie] - ordre[b.categorie];
     return a.titre.localeCompare(b.titre, "fr");
@@ -251,6 +274,7 @@ function calculerEcartsCanalV1_() {
 
   return {
     fiches: fiches,
+    nombreAExaminer: fiches.filter(function (f) { return f.categorie !== "HORS_LISTE_VOLONTAIRE"; }).length,
     totalCanal: totalCanal,
     scan: scan,
     scanUtilisable: scanUtilisable,
@@ -293,17 +317,23 @@ function construireHtmlCanalEcartsV1_(resultat) {
     { cle: "HTTP_404", titre: "PAGE INTROUVABLE SUR CANAL+ (HTTP 404)", aide: "Le film n'existe plus à cette adresse : très probablement retiré de Canal+." },
     { cle: "ABSENT_DATE_FUTURE", titre: "ABSENTS DE MA LISTE (DATE PAS ENCORE ATTEINTE)", aide: "À vérifier : retirés à la main, ou passés sur une autre chaîne ?" },
     { cle: "ABSENT_SANS_DATE", titre: "ABSENTS DE MA LISTE (SANS DATE)", aide: "À vérifier : jamais ajoutés dans Ma Liste, ou titre non reconnu ?" },
+    { cle: "HORS_LISTE_VOLONTAIRE", titre: "HORS LISTE VOLONTAIREMENT (RIEN À FAIRE)", aide: "Marquées « oui » dans la colonne HorsListeCanal. Elles restent suivies par le contrôle des dates.", discret: true },
   ];
 
-  function ligneFiche(f) {
+  function ligneFiche(f, discret) {
     const vignette = f.affiche
       ? '<img src="' + esc(f.affiche) + '" width="50" height="75" style="border-radius:4px;display:block" alt="">'
       : '<div style="width:50px;height:75px;border-radius:4px;background:#E3D9C4"></div>';
-    const lien = motDePasse
+    const lien = discret ? "" : motDePasse
       ? '<a href="' + baseUrl + "/api/confirm?page=remove&id=" + encodeURIComponent(f.id) +
         "&titre=" + encodeURIComponent(f.titre) + "&pw=" + encodeURIComponent(motDePasse) +
         '" style="color:#B5622B;font-weight:bold">Retirer de CinéMaison</a>'
       : '<span style="color:#9A9182">(AddFilmPassword absent de CONFIG : lien indisponible)</span>';
+    const garder = (!discret && motDePasse && (f.categorie === "ABSENT_DATE_FUTURE" || f.categorie === "ABSENT_SANS_DATE"))
+      ? ' &nbsp;|&nbsp; <a href="' + baseUrl + "/api/confirm?page=horsListeCanal&id=" + encodeURIComponent(f.id) +
+        "&titre=" + encodeURIComponent(f.titre) + "&pw=" + encodeURIComponent(motDePasse) +
+        '" style="color:#2B4256;font-weight:bold">Garder hors de Ma Liste</a>'
+      : "";
     return '<tr>' +
       '<td width="62" valign="top" style="padding:8px 12px 8px 0;border-bottom:1px solid #EFE7D6">' + vignette + '</td>' +
       '<td valign="top" style="padding:8px 0;border-bottom:1px solid #EFE7D6;font-size:13px;color:#3A2E22;font-family:Arial,sans-serif;line-height:1.5">' +
@@ -311,19 +341,19 @@ function construireHtmlCanalEcartsV1_(resultat) {
       'Plateforme : ' + esc(f.plateforme) + '<br>' +
       'Fin de disponibilité : ' + (f.dateFinFr ? esc(f.dateFinFr) : '<em>inconnue</em>') + '<br>' +
       '<span style="color:#9A9182;font-size:12px">' + esc(f.raison) + '</span><br>' +
-      lien +
+      lien + garder +
       '</td></tr>';
   }
 
   const blocs = sections.map(function (s) {
     const liste = resultat.fiches.filter(function (f) { return f.categorie === s.cle; });
     if (liste.length === 0) return "";
-    return '<div style="margin-top:22px">' +
+    return '<div style="margin-top:22px' + (s.discret ? ';opacity:0.6' : '') + '">' +
       '<div style="font-size:12px;letter-spacing:1px;color:#B5622B;font-family:Arial,sans-serif;font-weight:bold">' +
       s.titre + ' (' + liste.length + ')</div>' +
       '<div style="font-size:12px;color:#9A9182;font-family:Arial,sans-serif;margin:3px 0 4px">' + s.aide + '</div>' +
       '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">' +
-      liste.map(ligneFiche).join("") +
+      liste.map(function (f) { return ligneFiche(f, s.discret); }).join("") +
       '</table></div>';
   }).join("");
 
@@ -343,7 +373,7 @@ function construireHtmlCanalEcartsV1_(resultat) {
     : 'aucun scan enregistré';
 
   const resume = '<div style="font-size:13px;color:#3A2E22;font-family:Arial,sans-serif;line-height:1.6">' +
-    '<strong>' + resultat.fiches.length + '</strong> fiche(s) à examiner sur ' + resultat.totalCanal +
+    '<strong>' + resultat.nombreAExaminer + '</strong> fiche(s) à examiner sur ' + resultat.totalCanal +
     ' fiche(s) CANAL+ dans CinéMaison &middot; ' + scanTexte + '.</div>' +
     (resultat.avertissement
       ? '<div style="margin-top:10px;padding:10px 12px;background:#F6E7D3;border-radius:6px;font-size:12px;color:#7A4A1E;font-family:Arial,sans-serif">⚠ ' +
@@ -375,7 +405,7 @@ function genererEtEnvoyerRapportCanalEcartsV1() {
   const resultat = calculerEcartsCanalV1_();
   ecrireOngletCanalEcartsV1_(resultat);
 
-  const nombre = resultat.fiches.length;
+  const nombre = resultat.nombreAExaminer;
   const destinataires = destinatairesPourService_("AjoutAutoPrime");
   if (destinataires) {
     MailApp.sendEmail({
@@ -387,7 +417,7 @@ function genererEtEnvoyerRapportCanalEcartsV1() {
 
   journal_(
     "CANAL_ECARTS", "RAPPORT", destinataires ? "OK" : "IGNORE_SANS_DESTINATAIRE",
-    "Codes chaîne inconnus=" + Object.keys(resultat.codesInconnus || {}).join(",") + " | A examiner=" + nombre + " | Total CANAL+=" + resultat.totalCanal +
+    "Codes chaîne inconnus=" + Object.keys(resultat.codesInconnus || {}).join(",") + " | A examiner=" + nombre + " | Hors liste volontaire=" + (resultat.fiches.length - nombre) + " | Total CANAL+=" + resultat.totalCanal +
     " | Scan=" + (resultat.scan ? resultat.scan.nombre : "aucun") +
     (resultat.avertissement ? " | " + resultat.avertissement : "")
   );
