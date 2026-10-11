@@ -3,7 +3,7 @@
  * CinéMaison V4
  * Script  : 11_CONTROLE_PRIME_OFFICIEL.gs
  * Rôle    : Diagnostic et import sécurisé des résultats Prime Video officiels
- * Version : 1.10 (09/10/2026)
+ * Version : 1.11 (11/10/2026)
  * ============================================================
  *
  * Correctif V1.10 (09/10/2026) : même principe pour une fiche détectée
@@ -1187,7 +1187,13 @@ function nettoyageDatesAboVodPrimeV1_(ecrire) {
   protegees.forEach(function (p) { Logger.log("CONSERVÉE (autre source) : " + p); });
   Logger.log((ecrire ? "Dates effacées : " : "Dates qui seraient effacées : ") + concernees.length +
     " | conservées (autre source) : " + protegees.length);
-  return { effacees: ecrire ? concernees.length : 0, aEffacer: concernees.length, protegees: protegees.length };
+  return {
+    effacees: ecrire ? concernees.length : 0,
+    aEffacer: concernees.length,
+    protegees: protegees.length,
+    libellesAEffacer: concernees.map(function (c) { return c.libelle; }),
+    libellesProtegees: protegees
+  };
 }
 
 
