@@ -3,10 +3,20 @@
  * CinéMaison V4
  * Script : 06_CONNECTEURS_PLATEFORMES.gs
  * Rôle   : Connecteurs plateformes — CANAL+ uniquement
- * Version: 4.8.3
+ * Version: 4.8.4
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs,
  *               Worker Cloudflare CANAL+ V3.6
  * ============================================================
+ *
+ * Correctif V4.8.4 (11/10/2026) : réessais automatiques. Le 11/10/2026,
+ * "Spider-Man : No Way Home" a reçu "HTTP detail 404" alors que sa page
+ * existe (identifiant et URL justes) : refus passager de Canal+ envers le
+ * Worker. canalEnrichAvecReessaiV1_ refait jusqu'à 3 essais (pause 3 s puis
+ * 6 s) quand aucune date n'est extraite ET qu'une erreur HTTP est
+ * signalée, ou en cas de panne technique du Worker. Les "NO_MATCH"
+ * (film vraiment absent du catalogue) ne sont jamais réessayés. Nouvelle
+ * fonction d'éditeur : recontrolerFichesCanalAVerifierV1() -- refait le
+ * contrôle des seules fiches actuellement "à vérifier".
  *
  * Correctif V4.8.3 (09/10/2026) : détection AUTOMATIQUE de la VOD.
  * Chaque CanalContentId se termine par un code de chaîne (ex.
@@ -1090,7 +1100,7 @@ function controleCanalLigneV4_(sheet, rowNumber, row, h) {
   const ancienStatutAuto = get_(row, h, "StatutDisponibiliteAuto");
 
 
-  const api = canalEnrichCloudflareV4_(
+  const api = canalEnrichAvecReessaiV1_(
     titre,
     annee,
     ancienCanalId
@@ -1451,6 +1461,66 @@ function controleCanalLigneV4_(sheet, rowNumber, row, h) {
  * APPEL WORKER CANAL+
  * ============================================================
  */
+/**
+ * V4.8.4 -- appelle canalEnrichCloudflareV4_ jusqu'à 3 fois. Réessaie si :
+ *  - panne technique (réponse absente, non ok, hors NO_MATCH) ;
+ *  - ou aucune date extraite ET une erreur HTTP signalée dans le résultat
+ *    (ex. "HTTP detail 404" passager).
+ * Ne réessaie jamais un NO_MATCH ni un résultat avec une date.
+ */
+function canalEnrichAvecReessaiV1_(titre, annee, canalContentId) {
+  const ESSAIS = 3;
+  let api = null;
+  for (let essai = 1; essai <= ESSAIS; essai++) {
+    try {
+      api = canalEnrichCloudflareV4_(titre, annee, canalContentId);
+    } catch (err) {
+      api = { ok: false, error: "EXCEPTION " + String(err) };
+    }
+
+    let aReessayer = false;
+    if (!api || !api.ok || !api.result) {
+      aReessayer = !(api && api.error === "NO_MATCH");
+    } else {
+      const res = api.result;
+      const texte = String(res.commentaireDisponibilite || "") + " " + String(res.texteDisponibiliteOriginal || "");
+      aReessayer = !res.dateDisponibilite && /HTTP/i.test(texte);
+    }
+
+    if (!aReessayer || essai === ESSAIS) {
+      if (essai > 1) {
+        Logger.log("CANAL_REESSAI | " + titre + " | essai " + essai + "/" + ESSAIS + (aReessayer ? " | toujours en échec" : " | OK"));
+      }
+      return api;
+    }
+    Utilities.sleep(3000 * essai);
+  }
+  return api;
+}
+
+/**
+ * À lancer à la main depuis l'éditeur : refait le contrôle des dates des
+ * seules fiches CANAL+ actuellement en A_VERIFIER_CANAL (avec réessais).
+ * Écrit dans le Sheet comme le contrôle normal. Pas de mail.
+ */
+function recontrolerFichesCanalAVerifierV1() {
+  const sheet = getSheet_(SHEETS.FILMS);
+  const data = sheet.getDataRange().getValues();
+  const h = headers_(data[0]);
+  const resultats = [];
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    if (normalizePlatform_(get_(row, h, "Plateforme")) !== "CANAL+") continue;
+    if (String(get_(row, h, "StatutDisponibiliteAuto") || "").trim() !== "A_VERIFIER_CANAL") continue;
+    const titre = cleanTitle_(get_(row, h, "Titre"));
+    const r = controleCanalLigneV4_(sheet, i + 1, row, h);
+    resultats.push(titre + " -> " + (r && r.statut ? r.statut : "?"));
+  }
+  Logger.log("Fiches à vérifier recontrôlées (" + resultats.length + ") :\n" + resultats.join("\n"));
+  return resultats;
+}
+
+
 function canalEnrichCloudflareV4_(titre, annee, canalContentId) {
   const params = [];
 
