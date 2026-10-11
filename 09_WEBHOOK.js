@@ -7,7 +7,19 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.26
+ * Version: 2.28
+ *
+ * Correctif V2.28 (11/10/2026) : 3 actions de plus (canalReclasserVod,
+ * primeNettoyageApercu, primeNettoyageAppliquer), voir 22_ACTIONS_CANAL_APP.js.
+ *
+ * Correctif V2.27 (11/10/2026) : 4 nouvelles actions doPost CANAL+
+ * (canalRecontrolerAVerifier, canalControleComplet, canalEtatControle,
+ * canalArreterControle), boutons Réglages > CONTRÔLE CANAL+ ; voir
+ * 22_ACTIONS_CANAL_APP.js.
+ *
+ * Correctif V2.26 (10/10/2026) : le rapport automatique "CANAL+ écarts"
+ * réessaie jusqu'à 3 fois (erreur passagère "Expiration du délai de
+ * connexion au service Feuilles de calcul").
  *
  * Correctif V2.25 (09/10/2026) : le rapport "CANAL+ écarts" (21_CANAL_ECARTS.js)
  * est envoyé automatiquement après chaque scan Canal+ (canal.js), en plus
@@ -412,6 +424,12 @@ function doPost(e) {
     // NOUVEAU (07/10/2026) -- rapport "CANAL+ écarts" (21_CANAL_ECARTS.js).
     if (corps.action === "rapportCanalEcarts") {
       return traiterRapportCanalEcartsV1_(corps);
+    }
+
+    // NOUVEAU (11/10/2026) -- actions CANAL+ lançables depuis l'application
+    // (Réglages > CONTRÔLE CANAL+), voir 22_ACTIONS_CANAL_APP.js.
+    if (["canalRecontrolerAVerifier", "canalControleComplet", "canalEtatControle", "canalArreterControle", "canalReclasserVod", "primeNettoyageApercu", "primeNettoyageAppliquer"].indexOf(corps.action) !== -1) {
+      return traiterCanalActionAppV1_(corps);
     }
 
     if (corps.action === "alerteSuggestionsPrime") {
