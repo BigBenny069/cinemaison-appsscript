@@ -3,10 +3,16 @@
  * CinéMaison V4
  * Script : 06_CONNECTEURS_PLATEFORMES.gs
  * Rôle   : Connecteurs plateformes — CANAL+ uniquement
- * Version: 4.8.4
+ * Version: 4.8.6
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs,
  *               Worker Cloudflare CANAL+ V3.6
  * ============================================================
+ *
+ * V4.8.6 (11/10/2026) : reclasserVodSansDateCanalV1 retourne aussi la liste des
+ * fiches reclassées (mail du bouton Réglages).
+ *
+ * V4.8.5 (11/10/2026) : recontrolerFichesCanalAVerifierV1 retourne maintenant
+ * le résultat détaillé fiche par fiche (utilisé par 22_ACTIONS_CANAL_APP.js).
  *
  * Correctif V4.8.4 (11/10/2026) : réessais automatiques. Le 11/10/2026,
  * "Spider-Man : No Way Home" a reçu "HTTP detail 404" alors que sa page
@@ -1009,6 +1015,7 @@ function reclasserVodSansDateCanalV1() {
   const h = headers_(data[0]);
   let reclassees = 0;
   const restantes = [];
+  const titresReclasses = [];
 
   for (let i = 1; i < data.length; i++) {
     const ligne = data[i];
@@ -1027,6 +1034,7 @@ function reclasserVodSansDateCanalV1() {
         { force: true }
       );
       reclassees++;
+      titresReclasses.push(String(ligne[h.ID] || "") + " " + String(ligne[h.Titre] || ""));
     } else {
       restantes.push(String(ligne[h.Titre] || "") + " (StatutAcces=" + String(ligne[h.StatutAcces] || "vide") + ", CanalContentId=" + String(ligne[h.CanalContentId] || "vide") + ")");
     }
@@ -1034,7 +1042,7 @@ function reclasserVodSansDateCanalV1() {
 
   Logger.log("reclasserVodSansDateCanalV1 : " + reclassees + " fiche(s) reclassée(s) VOD_SANS_DATE.");
   Logger.log("Restent à vérifier sans erreur HTTP, NON marquées VOD (" + restantes.length + ") : " + restantes.join(" | "));
-  return { reclassees: reclassees, restantes: restantes };
+  return { reclassees: reclassees, restantes: restantes, titresReclasses: titresReclasses };
 }
 
 
@@ -1507,16 +1515,34 @@ function recontrolerFichesCanalAVerifierV1() {
   const sheet = getSheet_(SHEETS.FILMS);
   const data = sheet.getDataRange().getValues();
   const h = headers_(data[0]);
-  const resultats = [];
+  const lignes = [];
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     if (normalizePlatform_(get_(row, h, "Plateforme")) !== "CANAL+") continue;
     if (String(get_(row, h, "StatutDisponibiliteAuto") || "").trim() !== "A_VERIFIER_CANAL") continue;
-    const titre = cleanTitle_(get_(row, h, "Titre"));
-    const r = controleCanalLigneV4_(sheet, i + 1, row, h);
-    resultats.push(titre + " -> " + (r && r.statut ? r.statut : "?"));
+    controleCanalLigneV4_(sheet, i + 1, row, h);
+    lignes.push(i + 1);
   }
-  Logger.log("Fiches à vérifier recontrôlées (" + resultats.length + ") :\n" + resultats.join("\n"));
+  // Relit les lignes après contrôle pour rapporter l'état réel.
+  const resultats = lignes.map(function (numero) {
+    const ligne = sheet.getRange(numero, 1, 1, data[0].length).getValues()[0];
+    const dateBrute = get_(ligne, h, "DateDisponibiliteAuto");
+    let dateFin = "";
+    if (dateBrute) {
+      dateFin = Object.prototype.toString.call(dateBrute) === "[object Date]" && !isNaN(dateBrute.getTime())
+        ? Utilities.formatDate(dateBrute, Session.getScriptTimeZone(), "dd/MM/yyyy")
+        : String(dateBrute);
+    }
+    return {
+      id: String(get_(ligne, h, "ID") || ""),
+      titre: String(get_(ligne, h, "Titre") || ""),
+      statutFinal: String(get_(ligne, h, "StatutDisponibiliteAuto") || "").trim(),
+      dateFin: dateFin,
+      commentaire: String(get_(ligne, h, "CommentaireDisponibilite") || "")
+    };
+  });
+  Logger.log("Fiches à vérifier recontrôlées (" + resultats.length + ") :\n" +
+    resultats.map(function (r) { return r.id + " " + r.titre + " -> " + r.statutFinal + " " + r.dateFin; }).join("\n"));
   return resultats;
 }
 
