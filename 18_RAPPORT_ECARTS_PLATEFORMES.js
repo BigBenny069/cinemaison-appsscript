@@ -13,7 +13,12 @@
  *             DERNIERES_SUGGESTIONS_PLATEFORMES (voir 09_WEBHOOK.gs),
  *             donc toujours la donnée du dernier scan de chaque
  *             plateforme, même si le scan remonte à plusieurs jours.
- * Version : 1.6
+ * Version : 1.7
+ *
+ * Correctif V1.7 (12/10/2026) : la partie "À RETIRER" distingue les fiches
+ * "jamais rattachées" (jamais vues dans un scan : doublon probable ou
+ * titre/année qui ne colle pas) des fiches "parties de la plateforme",
+ * chacune avec son message et sa suggestion.
  *
  * Correctif V1.6 (30/09/2026) : affiné sur suggestion de Ben --
  * "à retirer" utilise maintenant en priorité la date théorique de
@@ -297,6 +302,29 @@ function calculerEcartsRetraitV1_(plateforme) {
     if (id) idsScannes[id] = true;
   }
 
+  // NOUVEAU (v1.7, 12/10/2026) -- on distingue deux cas d'absence :
+  //  - "jamais rattachée" : aucun scan n'a JAMAIS vu cette fiche
+  //    (DernierControleDisponibilite vide) -> en général un doublon
+  //    ou un titre/année qui ne colle pas avec ce que la plateforme
+  //    affiche (cas FILM1284 "Dans ses yeux" doublon de FILM0604) ;
+  //  - "partie de la plateforme" : déjà vue avant, absente maintenant.
+  // Pour le premier cas on cherche un doublon probable : une AUTRE
+  // fiche de la même plateforme, même titre normalisé, PRÉSENTE dans
+  // le scan.
+  const fichesScannees = {}; // titre normalisé -> {id, titre, annee}
+  for (let i = 1; i < donneesFilms.length; i++) {
+    const l = donneesFilms[i];
+    const idL = String(l[hFilms.ID] || "").trim();
+    if (!idL || !idsScannes[idL]) continue;
+    const cle = normaliserTitreIgnoresV1_(String(l[hFilms.Titre] || ""));
+    if (!cle || fichesScannees[cle]) continue;
+    fichesScannees[cle] = {
+      id: idL,
+      titre: String(l[hFilms.Titre] || "").trim(),
+      annee: hFilms.Annee !== undefined ? String(l[hFilms.Annee] || "").trim() : "",
+    };
+  }
+
   const manquants = [];
   for (let i = 1; i < donneesFilms.length; i++) {
     const ligne = donneesFilms[i];
@@ -305,9 +333,15 @@ function calculerEcartsRetraitV1_(plateforme) {
     if (!estDeCettePlateforme(ligne[hFilms.Plateforme])) continue;
     const id = String(ligne[hFilms.ID] || "").trim();
     if (!id || idsScannes[id]) continue;
+    const jamaisVu = hFilms.DernierControleDisponibilite !== undefined &&
+      !String(ligne[hFilms.DernierControleDisponibilite] || "").trim();
+    const doublon = jamaisVu ? (fichesScannees[normaliserTitreIgnoresV1_(titre)] || null) : null;
     manquants.push({
       id: id,
       titre: titre,
+      annee: hFilms.Annee !== undefined ? String(ligne[hFilms.Annee] || "").trim() : "",
+      jamaisVu: jamaisVu,
+      doublon: doublon,
       affiche: hFilms.Affiche !== undefined ? String(ligne[hFilms.Affiche] || "") : "",
       // NOUVEAU (30/09/2026) -- voir filtrerManquantsConfirmesV1_ : sert
       // à départager "vraiment parti" de "encore accessible jusqu'à ce
@@ -512,16 +546,37 @@ function construireHtmlRapportEcartsV1_(parPlateforme) {
     let html = '<div style="margin-top:20px"><div style="font-size:14px;font-weight:bold;color:#3A2E22">' + p.plateforme + '</div>';
 
     if (p.manquants.length > 0) {
-      html += '<div style="font-size:12px;color:#9A9182;margin-top:6px">À RETIRER (' + p.manquants.length + ')</div>';
-      html += p.manquants.map(function (m) {
+      const ligneManquant = function (m, message) {
         const retirerUrl = baseUrl + "/api/confirm?page=remove&id=" + encodeURIComponent(m.id) +
           "&titre=" + encodeURIComponent(m.titre) + "&pw=" + encodeURIComponent(motDePasse);
         return '<div style="display:flex;align-items:flex-start;padding:8px 0;border-bottom:1px solid #EFE7D6">' +
           vignetteHtml(m.affiche) +
           '<div style="font-size:13px;color:#3A2E22;font-family:Arial,sans-serif">' +
-          m.titre + ' (' + m.id + ')<br><a href="' + retirerUrl + '" style="color:#B5622B">Retirer de CinéMaison</a>' +
+          m.titre + (m.annee ? ' (' + m.annee + ')' : '') + ' — ' + m.id + '<br>' +
+          '<span style="color:#7A6F5E">' + message + '</span><br>' +
+          '<a href="' + retirerUrl + '" style="color:#B5622B">Retirer de CinéMaison</a>' +
           '</div></div>';
-      }).join("");
+      };
+      const jamais = p.manquants.filter(function (m) { return m.jamaisVu; });
+      const parties = p.manquants.filter(function (m) { return !m.jamaisVu; });
+
+      if (jamais.length > 0) {
+        html += '<div style="font-size:12px;color:#9A9182;margin-top:6px">JAMAIS RATTACHÉES À LA PLATEFORME (' + jamais.length + ')</div>';
+        html += jamais.map(function (m) {
+          const msg = m.doublon
+            ? 'Probable doublon de ' + m.doublon.id + ' — ' + m.doublon.titre + (m.doublon.annee ? ' (' + m.doublon.annee + ')' : '') +
+              ', qui est bien vu sur la plateforme. Suggestion : retire cette fiche-ci.'
+            : 'Cette fiche n\'a jamais été vue lors d\'un contrôle. Suggestion : vérifie le titre et l\'année (ils doivent coller à ce qu\'affiche la plateforme), ou retire-la si elle n\'y est pas.';
+          return ligneManquant(m, msg);
+        }).join("");
+      }
+
+      if (parties.length > 0) {
+        html += '<div style="font-size:12px;color:#9A9182;margin-top:10px">PARTIES DE LA PLATEFORME (' + parties.length + ')</div>';
+        html += parties.map(function (m) {
+          return ligneManquant(m, 'Vue avant, absente du dernier contrôle : le film semble avoir quitté la plateforme. Suggestion : retire-la de CinéMaison.');
+        }).join("");
+      }
     }
 
     if (p.suggestions.length > 0) {
