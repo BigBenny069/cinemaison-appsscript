@@ -6,13 +6,16 @@
  *           alors qu'elles ont des ID TMDb différents (une des deux a
  *           forcément une mauvaise URL). Lecture seule : ne modifie
  *           JAMAIS l'onglet Films.
- * Version : 1.0 (14/10/2026)
+ * Version : 1.1 (14/10/2026)
  * ============================================================
  *
  * Création (14/10/2026) : demandé par Ben après avoir constaté que
  * FILM0974 (Échos, TMDb 129612) et FILM0975 (Bill Burr: Live at Red
  * Rocks, TMDb 991115) portaient la même URL Letterboxd
  * (/film/echoes-2023-3/), toutes deux enrichies le 06/09/2026.
+ *
+ * V1.1 : envoie un mail quand des groupes suspects sont trouvés (rien si RAS)
+ * et propose installerDeclencheurDiagnosticUrlLetterboxdV1() (lundi 7h).
  *
  * Usage : lance diagnosticUrlLetterboxdDoublonsV1() depuis l'éditeur.
  * Résultat dans l'onglet DIAGNOSTIC_URL_LETTERBOXD (créé une fois,
@@ -111,5 +114,26 @@ function diagnosticUrlLetterboxdDoublonsV1() {
     feuille.setFrozenRows(1);
   }
   Logger.log("Diagnostic URL Letterboxd : " + nbGroupes + " groupe(s) suspect(s).");
+  if (nbGroupes > 0) {
+    const ids = lignes.slice(1).map(function (l) { return l[1] + " " + l[2]; });
+    envoyerMailRapport_(
+      "CinéMaison - V2 - URL Letterboxd partagées (" + nbGroupes + " groupe(s))",
+      nbGroupes + " URL Letterboxd sont partagées par des films différents. Détail dans l'onglet " +
+      "DIAGNOSTIC_URL_LETTERBOXD. Fiches concernées :\n\n" + ids.join("\n") +
+      "\n\nPour corriger : efface la cellule URLLetterboxd des fiches fausses.",
+      "AlerteTechnique"
+    );
+  }
   return nbGroupes;
+}
+
+
+/** À lancer une fois : diagnostic automatique chaque lundi à 7h (mail seulement s'il y a un problème). */
+function installerDeclencheurDiagnosticUrlLetterboxdV1() {
+  ScriptApp.getProjectTriggers()
+    .filter(function (t) { return t.getHandlerFunction() === "diagnosticUrlLetterboxdDoublonsV1"; })
+    .forEach(function (t) { ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger("diagnosticUrlLetterboxdDoublonsV1")
+    .timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(7).create();
+  Logger.log("Déclencheur hebdomadaire (lundi 7h) installé.");
 }
