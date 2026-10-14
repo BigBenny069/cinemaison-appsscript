@@ -3,7 +3,7 @@
  * CinéMaison V4
  * Script : 03_LETTERBOXD.gs
  * Rôle   : Recherche automatique et lecture Letterboxd
- * Version: 4.5.5
+ * Version: 4.5.6
  * Dépendances :
  *   - 00_CONFIG.gs
  *   - 01_UTILS.gs
@@ -108,10 +108,17 @@
  *   avec des pauses croissantes (3s, 6s, 10s), pour une URL manuelle
  *   uniquement. Reste largement sous la marge du verrou de 90s pris
  *   par reenrichirParIdSheetV1_ (09_WEBHOOK.gs).
+ * Correctif V4.5.6 (14/10/2026) : garde-fou "URL déjà prise". Constat de
+ * Ben : une vingtaine de fiches (ex. FILM0974/FILM0975) portaient l'URL
+ * Letterboxd d'une autre fiche, avec des ID TMDb différents. Une URL
+ * TROUVÉE AUTOMATIQUEMENT est maintenant refusée si une autre fiche
+ * (TMDbID différent) la possède déjà : la fiche reste "PAS DE LETTERBOXD"
+ * (réessayée plus tard) et un mail d'alerte est envoyé (une seule fois
+ * par couple URL/TMDb). Une URL saisie à la main n'est pas concernée.
  * ============================================================
  */
 
-const VERSION_LETTERBOXD_V4 = "V4.5.5";
+const VERSION_LETTERBOXD_V4 = "V4.5.6";
 const LETTERBOXD_BASE_V4 = "https://letterboxd.com";
 const LETTERBOXD_PAS_DE_FICHE_V43 = "PAS DE LETTERBOXD";
 const LETTERBOXD_PAS_DE_NOTE_V43 = "PAS DE NOTE";
@@ -275,8 +282,18 @@ function chercherLetterboxd_(
         type
       );
       if (recherche && recherche.url) {
+        const prise = urlLetterboxdPriseParAutreFilmV1_(recherche.url, tmdbId);
+        if (prise) {
+          alerterUrlLetterboxdDejaPriseV1_(recherche.url, titrePropre, tmdbId, prise);
+          const refus = resultatSansLetterboxdV43_(
+            "URL Letterboxd refusée : déjà utilisée par " + prise.id +
+            " (" + prise.titre + ")"
+          );
+          return refus;
+        }
         urlTrouvee = recherche.url;
         source = recherche.source || "AUTOMATIQUE";
+        memoriserUrlLetterboxdV1_(urlTrouvee, tmdbId, titrePropre);
       }
     }
 
@@ -1162,3 +1179,87 @@ function testerDiagnosticTmdbFilmV451() {
 }
 
 
+
+
+/**
+ * V4.5.6 -- garde-fou "URL déjà prise".
+ * Carte url -> [{id, titre, tmdb}] lue UNE fois par exécution dans Films.
+ */
+var CARTE_URL_LETTERBOXD_V1_ = null;
+
+function chargerCarteUrlLetterboxdV1_() {
+  if (CARTE_URL_LETTERBOXD_V1_) return CARTE_URL_LETTERBOXD_V1_;
+  const carte = {};
+  try {
+    const films = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Films");
+    const donnees = films ? films.getDataRange().getValues() : [];
+    if (donnees.length > 1) {
+      const e = donnees[0].map(function (x) { return String(x || "").trim(); });
+      const cId = e.indexOf("ID"), cTitre = e.indexOf("Titre"),
+        cTmdb = e.indexOf("TMDbID"), cUrl = e.indexOf("URLLetterboxd");
+      if (cId !== -1 && cUrl !== -1 && cTmdb !== -1) {
+        for (let i = 1; i < donnees.length; i++) {
+          const url = String(donnees[i][cUrl] || "").trim();
+          if (!/letterboxd\.com\/film\//i.test(url)) continue;
+          const cle = nettoyerUrlLetterboxd_(url).toLowerCase();
+          if (!carte[cle]) carte[cle] = [];
+          carte[cle].push({
+            id: String(donnees[i][cId] || "").trim(),
+            titre: cTitre !== -1 ? String(donnees[i][cTitre] || "").trim() : "",
+            tmdb: String(donnees[i][cTmdb] || "").trim()
+          });
+        }
+      }
+    }
+  } catch (err) {
+    Logger.log("chargerCarteUrlLetterboxdV1_ : " + err);
+  }
+  CARTE_URL_LETTERBOXD_V1_ = carte;
+  return carte;
+}
+
+/** Retourne {id, titre} de la fiche qui possède déjà cette URL avec un AUTRE TMDb, sinon null. */
+function urlLetterboxdPriseParAutreFilmV1_(url, tmdbId) {
+  const tmdb = String(tmdbId || "").trim();
+  if (!tmdb) return null; // sans TMDb on ne peut pas comparer : on ne bloque pas
+  const cle = nettoyerUrlLetterboxd_(url).toLowerCase();
+  const membres = chargerCarteUrlLetterboxdV1_()[cle] || [];
+  for (let i = 0; i < membres.length; i++) {
+    if (membres[i].tmdb && membres[i].tmdb !== tmdb) {
+      return { id: membres[i].id, titre: membres[i].titre };
+    }
+  }
+  return null;
+}
+
+/** Note l'URL acceptée pour les fiches suivantes de la même exécution. */
+function memoriserUrlLetterboxdV1_(url, tmdbId, titre) {
+  const tmdb = String(tmdbId || "").trim();
+  if (!tmdb) return;
+  const cle = nettoyerUrlLetterboxd_(url).toLowerCase();
+  const carte = chargerCarteUrlLetterboxdV1_();
+  if (!carte[cle]) carte[cle] = [];
+  carte[cle].push({ id: "(en cours)", titre: titre || "", tmdb: tmdb });
+}
+
+/** Mail d'alerte, une seule fois par couple URL/TMDb. */
+function alerterUrlLetterboxdDejaPriseV1_(url, titre, tmdbId, prise) {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const cle = "LBCONF|" + nettoyerUrlLetterboxd_(url).toLowerCase() + "|" + tmdbId;
+    if (props.getProperty(cle)) return;
+    props.setProperty(cle, new Date().toISOString());
+    logWarn("LETTERBOXD", "URL refusée (déjà prise) : " + url + " | " + titre);
+    envoyerMailRapport_(
+      "CinéMaison - V2 - URL Letterboxd refusée (déjà utilisée)",
+      "Le script a trouvé pour \"" + titre + "\" (TMDb " + tmdbId + ") l'URL :\n" + url +
+      "\n\nMais elle est déjà utilisée par " + prise.id + " (" + prise.titre + "), qui a un autre TMDb." +
+      "\n\nL'URL n'a PAS été écrite. Vérifie les deux fiches : si l'URL de " + prise.id +
+      " est fausse, efface sa cellule URLLetterboxd ; la fiche \"" + titre +
+      "\" sera réessayée plus tard.",
+      "AlerteTechnique"
+    );
+  } catch (e) {
+    Logger.log("alerterUrlLetterboxdDejaPriseV1_ : " + e);
+  }
+}
