@@ -5,7 +5,10 @@
  * Rôle    : Diagnostic et import sécurisé des résultats officiels
  *           Netflix / Disney+ (équivalent générique de
  *           11_CONTROLE_PRIME_OFFICIEL.gs, laissé intact pour Prime).
- * Version : 1.3
+ * Version : 1.4
+ *
+ * Correctif V1.4 (14/10/2026) : plateforme SHADOWZ ajoutée à
+ * PLATEFORMES_STREAMING_V1 (onglet CONTROLE_SHADOWZ).
  *
  * Correctif V1.3 (30/09/2026) : transmet maintenant dateRetraitAvant
  * au mail "Détail du contrôle" -- même correctif que
@@ -74,6 +77,13 @@ const PLATEFORMES_STREAMING_V1 = Object.freeze({
     sourceOfficielle: "DISNEY+ OFFICIEL",
     libellePlateforme: "DISNEY+",
     motifs: ["DISNEY"],
+  },
+  // NOUVEAU (14/10/2026) -- Shadowz (collecteur shadowz.js).
+  SHADOWZ: {
+    feuilleControle: "CONTROLE_SHADOWZ",
+    sourceOfficielle: "SHADOWZ OFFICIEL",
+    libellePlateforme: "SHADOWZ",
+    motifs: ["SHADOWZ"],
   },
 });
 
