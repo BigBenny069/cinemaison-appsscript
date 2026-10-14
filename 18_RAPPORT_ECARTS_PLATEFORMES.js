@@ -13,7 +13,10 @@
  *             DERNIERES_SUGGESTIONS_PLATEFORMES (voir 09_WEBHOOK.gs),
  *             donc toujours la donnée du dernier scan de chaque
  *             plateforme, même si le scan remonte à plusieurs jours.
- * Version : 1.7
+ * Version : 1.8
+ *
+ * Correctif V1.8 (14/10/2026) : plateforme SHADOWZ ajoutée au rapport
+ * (RAPPORT_ECARTS_PLATEFORMES_V1).
  *
  * Correctif V1.7 (12/10/2026) : la partie "À RETIRER" distingue les fiches
  * "jamais rattachées" (jamais vues dans un scan : doublon probable ou
@@ -91,7 +94,7 @@
  *    l'éditeur -- crée le déclencheur quotidien.
  */
 
-const RAPPORT_ECARTS_PLATEFORMES_V1 = ["PRIME", "NETFLIX", "DISNEY"];
+const RAPPORT_ECARTS_PLATEFORMES_V1 = ["PRIME", "NETFLIX", "DISNEY", "SHADOWZ"];
 const RAPPORT_ECARTS_SUGGESTIONS_FEUILLE_V1 = "DERNIERES_SUGGESTIONS_PLATEFORMES";
 
 /**
