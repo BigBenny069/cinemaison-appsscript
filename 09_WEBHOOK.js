@@ -7,7 +7,10 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.28
+ * Version: 2.29
+ *
+ * Correctif V2.29 (14/10/2026) : plateforme SHADOWZ ajoutée aux listes
+ * autorisées (page de détail du contrôle, libellé des mails de suggestions).
  *
  * Correctif V2.28 (11/10/2026) : 3 actions de plus (canalReclasserVod,
  * primeNettoyageApercu, primeNettoyageAppliquer), voir 22_ACTIONS_CANAL_APP.js.
@@ -508,7 +511,7 @@ function doGet(e) {
   }
 
   const plateforme = String(params.plateforme || "").trim().toUpperCase();
-  if (["PRIME", "NETFLIX", "DISNEY"].indexOf(plateforme) === -1) {
+  if (["PRIME", "NETFLIX", "DISNEY", "SHADOWZ"].indexOf(plateforme) === -1) {
     return HtmlService.createHtmlOutput("<p>Plateforme inconnue.</p>");
   }
 
@@ -1571,7 +1574,7 @@ function construireHtmlResumeControlePrimeV1_(resume, confirmUrl, plateforme) {
 function construireHtmlSuggestionsPrimeV1_(fiches, ambiguites, plateforme) {
   ambiguites = ambiguites || [];
   plateforme = plateforme || "PRIME";
-  const LABELS_HUMAINS_V1 = { "PRIME": "Prime Video", "NETFLIX": "Netflix", "DISNEY": "Disney+" };
+  const LABELS_HUMAINS_V1 = { "PRIME": "Prime Video", "NETFLIX": "Netflix", "DISNEY": "Disney+", "SHADOWZ": "Shadowz" };
   const labelHumain = LABELS_HUMAINS_V1[plateforme] || plateforme;
 
   let lignes = "";
