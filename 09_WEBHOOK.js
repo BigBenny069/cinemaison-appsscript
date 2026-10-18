@@ -7,7 +7,10 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.29
+ * Version: 2.30
+ *
+ * Correctif V2.30 (18/10/2026) : plateforme PARAMOUNT (Paramount+) ajoutée aux
+ * listes autorisées (page de détail du contrôle, libellé des mails de suggestions).
  *
  * Correctif V2.29 (14/10/2026) : plateforme SHADOWZ ajoutée aux listes
  * autorisées (page de détail du contrôle, libellé des mails de suggestions).
@@ -511,7 +514,7 @@ function doGet(e) {
   }
 
   const plateforme = String(params.plateforme || "").trim().toUpperCase();
-  if (["PRIME", "NETFLIX", "DISNEY", "SHADOWZ"].indexOf(plateforme) === -1) {
+  if (["PRIME", "NETFLIX", "DISNEY", "SHADOWZ", "PARAMOUNT"].indexOf(plateforme) === -1) {
     return HtmlService.createHtmlOutput("<p>Plateforme inconnue.</p>");
   }
 
@@ -1574,7 +1577,7 @@ function construireHtmlResumeControlePrimeV1_(resume, confirmUrl, plateforme) {
 function construireHtmlSuggestionsPrimeV1_(fiches, ambiguites, plateforme) {
   ambiguites = ambiguites || [];
   plateforme = plateforme || "PRIME";
-  const LABELS_HUMAINS_V1 = { "PRIME": "Prime Video", "NETFLIX": "Netflix", "DISNEY": "Disney+", "SHADOWZ": "Shadowz" };
+  const LABELS_HUMAINS_V1 = { "PRIME": "Prime Video", "NETFLIX": "Netflix", "DISNEY": "Disney+", "SHADOWZ": "Shadowz", "PARAMOUNT": "Paramount+" };
   const labelHumain = LABELS_HUMAINS_V1[plateforme] || plateforme;
 
   let lignes = "";
