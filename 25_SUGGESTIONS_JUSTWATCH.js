@@ -6,7 +6,10 @@
  *          (source JustWatch) qui ressemblent à ce qui est déjà dans
  *          CinéMaison. Écrit l'onglet SUGGESTIONS (lu par l'app) et
  *          envoie un mail récapitulatif.
- * Version: 1.1 (18/10/2026)
+ * Version: 1.2 (18/10/2026)
+ *   V1.2 : nouvelle colonne NoteLetterboxd (remplie par l'app via Vercel, car
+ *          Apps Script est bloqué par Letterboxd) ; ce script ne fait que
+ *          CONSERVER les notes déjà trouvées d'un jour à l'autre.
  *   V1.1 : l'écriture dans le Sheet est relancée jusqu'à 4 fois en cas de
  *          « délai de connexion dépassé » (incident passager de Google).
  * Dépendances : 00_CONFIG, 01_UTILS, 07_MAILS, 10_GENRES
@@ -48,7 +51,7 @@ const SUGGESTIONS_PLATEFORMES_V1 = Object.freeze([
 const SUGGESTIONS_ENTETES_V1 = Object.freeze([
   "Cle", "Plateforme", "Type", "Titre", "Annee", "Genres", "TMDbID", "IMDbID",
   "Score", "Raison", "Synopsis", "Affiche", "URL", "DisponibleJusqua",
-  "NoteTMDb", "PremiereVue", "MisAJour"
+  "NoteTMDb", "PremiereVue", "MisAJour", "NoteLetterboxd"
 ]);
 
 const SUGGESTIONS_RETOURS_ENTETES_V1 = Object.freeze([
@@ -373,6 +376,7 @@ function suggestionsPasserV1_(avecMail) {
 
   // Anciennes lignes : pour garder la date de première apparition
   const anciennes = suggestionsLireAnciennesV1_();
+  const anciennesVues = anciennes.premiere;
 
   const retenues = [];
   const erreurs = [];
@@ -401,7 +405,8 @@ function suggestionsPasserV1_(avecMail) {
 
       const gardees = eligibles.slice(0, parPlateforme);
       gardees.forEach(function(t) {
-        t.premiereVue = anciennes[t.cle + "|" + t.plateforme] || aujourdhui;
+        t.premiereVue = anciennesVues[t.cle + "|" + t.plateforme] || aujourdhui;
+        t.noteLetterboxd = anciennes.notes[t.cle] || "";
         retenues.push(t);
       });
 
@@ -444,7 +449,7 @@ function suggestionsPasserV1_(avecMail) {
 }
 
 function suggestionsLireAnciennesV1_() {
-  const res = {};
+  const res = { premiere: {}, notes: {} };
   const feuille = getSheet_(SUGGESTIONS_ONGLET_V1);
   if (!feuille || feuille.getLastRow() < 2) return res;
   const valeurs = feuille.getDataRange().getValues();
@@ -454,7 +459,9 @@ function suggestionsLireAnciennesV1_() {
     const pf = String(get_(valeurs[i], h, "Plateforme") || "");
     let pv = get_(valeurs[i], h, "PremiereVue");
     if (pv instanceof Date) pv = Utilities.formatDate(pv, Session.getScriptTimeZone(), "yyyy-MM-dd");
-    if (cle && pv) res[cle + "|" + pf] = String(pv);
+    if (cle && pv) res.premiere[cle + "|" + pf] = String(pv);
+    const note = String(get_(valeurs[i], h, "NoteLetterboxd") || "").trim();
+    if (cle && note) res.notes[cle] = note;
   }
   return res;
 }
@@ -466,6 +473,12 @@ function suggestionsAssurerOngletV1_(nom, entetes) {
     feuille = getSpreadsheet_().insertSheet(nom);
     feuille.getRange(1, 1, 1, entetes.length).setValues([entetes.slice()]);
     feuille.setFrozenRows(1);
+  } else {
+    // Onglet déjà là (ancienne version) : on remet à jour la ligne d'en-têtes
+    // pour qu'elle contienne les colonnes ajoutées depuis (ex. NoteLetterboxd).
+    const actuel = feuille.getRange(1, 1, 1, Math.max(feuille.getLastColumn(), 1)).getValues()[0];
+    const identique = entetes.every(function(e, i) { return String(actuel[i] || "") === e; });
+    if (!identique) feuille.getRange(1, 1, 1, entetes.length).setValues([entetes.slice()]);
   }
   return feuille;
 }
@@ -497,7 +510,7 @@ function suggestionsEcrireOngletUneFoisV1_(titres, maintenant) {
     return [
       t.cle, t.plateforme, t.type, t.titre, t.annee, t.genres.join(" / "),
       t.tmdbId, t.imdbId, t.score, t.raison, t.synopsis, t.affiche, t.url,
-      t.jusqua, t.noteTmdb, t.premiereVue, stamp
+      t.jusqua, t.noteTmdb, t.premiereVue, stamp, t.noteLetterboxd || ""
     ];
   });
 
