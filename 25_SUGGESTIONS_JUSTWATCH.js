@@ -6,7 +6,9 @@
  *          (source JustWatch) qui ressemblent à ce qui est déjà dans
  *          CinéMaison. Écrit l'onglet SUGGESTIONS (lu par l'app) et
  *          envoie un mail récapitulatif.
- * Version: 1.0 (18/10/2026)
+ * Version: 1.1 (18/10/2026)
+ *   V1.1 : l'écriture dans le Sheet est relancée jusqu'à 4 fois en cas de
+ *          « délai de connexion dépassé » (incident passager de Google).
  * Dépendances : 00_CONFIG, 01_UTILS, 07_MAILS, 10_GENRES
  *
  * Onglets utilisés (créés automatiquement) :
@@ -458,6 +460,7 @@ function suggestionsLireAnciennesV1_() {
 }
 
 function suggestionsAssurerOngletV1_(nom, entetes) {
+  SpreadsheetApp.flush();
   let feuille = getSheet_(nom);
   if (!feuille) {
     feuille = getSpreadsheet_().insertSheet(nom);
@@ -467,7 +470,25 @@ function suggestionsAssurerOngletV1_(nom, entetes) {
   return feuille;
 }
 
+function suggestionsRelancerV1_(fonction) {
+  let derniere = null;
+  for (let essai = 1; essai <= 4; essai++) {
+    try {
+      return fonction();
+    } catch (e) {
+      derniere = e;
+      Logger.log("Écriture Sheet : essai " + essai + " échoué (" + e.message + ")");
+      Utilities.sleep(2000 * essai);
+    }
+  }
+  throw derniere;
+}
+
 function suggestionsEcrireOngletV1_(titres, maintenant) {
+  suggestionsRelancerV1_(function() { suggestionsEcrireOngletUneFoisV1_(titres, maintenant); });
+}
+
+function suggestionsEcrireOngletUneFoisV1_(titres, maintenant) {
   const feuille = suggestionsAssurerOngletV1_(SUGGESTIONS_ONGLET_V1, SUGGESTIONS_ENTETES_V1);
   suggestionsAssurerOngletV1_(SUGGESTIONS_RETOURS_V1, SUGGESTIONS_RETOURS_ENTETES_V1);
 
