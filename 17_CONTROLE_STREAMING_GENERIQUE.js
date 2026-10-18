@@ -5,7 +5,10 @@
  * Rôle    : Diagnostic et import sécurisé des résultats officiels
  *           Netflix / Disney+ (équivalent générique de
  *           11_CONTROLE_PRIME_OFFICIEL.gs, laissé intact pour Prime).
- * Version : 1.4
+ * Version : 1.5
+ *
+ * Correctif V1.5 (18/10/2026) : plateforme PARAMOUNT (Paramount+) ajoutée à
+ * PLATEFORMES_STREAMING_V1 (onglet CONTROLE_PARAMOUNT).
  *
  * Correctif V1.4 (14/10/2026) : plateforme SHADOWZ ajoutée à
  * PLATEFORMES_STREAMING_V1 (onglet CONTROLE_SHADOWZ).
@@ -84,6 +87,14 @@ const PLATEFORMES_STREAMING_V1 = Object.freeze({
     sourceOfficielle: "SHADOWZ OFFICIEL",
     libellePlateforme: "SHADOWZ",
     motifs: ["SHADOWZ"],
+  },
+  // NOUVEAU (18/10/2026) -- Paramount+ (collecteur paramount.js). "PARAMOUTH"
+  // = faute de frappe possible dans la colonne Plateforme, reconnue aussi.
+  PARAMOUNT: {
+    feuilleControle: "CONTROLE_PARAMOUNT",
+    sourceOfficielle: "PARAMOUNT OFFICIEL",
+    libellePlateforme: "PARAMOUNT+",
+    motifs: ["PARAMOUNT", "PARAMOUTH"],
   },
 });
 
