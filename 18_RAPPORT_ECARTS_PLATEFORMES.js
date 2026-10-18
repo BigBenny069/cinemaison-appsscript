@@ -13,7 +13,10 @@
  *             DERNIERES_SUGGESTIONS_PLATEFORMES (voir 09_WEBHOOK.gs),
  *             donc toujours la donnée du dernier scan de chaque
  *             plateforme, même si le scan remonte à plusieurs jours.
- * Version : 1.8
+ * Version : 1.9
+ *
+ * Correctif V1.9 (18/10/2026) : plateforme PARAMOUNT ajoutée au rapport
+ * (RAPPORT_ECARTS_PLATEFORMES_V1).
  *
  * Correctif V1.8 (14/10/2026) : plateforme SHADOWZ ajoutée au rapport
  * (RAPPORT_ECARTS_PLATEFORMES_V1).
@@ -94,7 +97,7 @@
  *    l'éditeur -- crée le déclencheur quotidien.
  */
 
-const RAPPORT_ECARTS_PLATEFORMES_V1 = ["PRIME", "NETFLIX", "DISNEY", "SHADOWZ"];
+const RAPPORT_ECARTS_PLATEFORMES_V1 = ["PRIME", "NETFLIX", "DISNEY", "SHADOWZ", "PARAMOUNT"];
 const RAPPORT_ECARTS_SUGGESTIONS_FEUILLE_V1 = "DERNIERES_SUGGESTIONS_PLATEFORMES";
 
 /**
