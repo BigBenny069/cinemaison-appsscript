@@ -6,7 +6,9 @@
  *          (source JustWatch) qui ressemblent à ce qui est déjà dans
  *          CinéMaison. Écrit l'onglet SUGGESTIONS (lu par l'app) et
  *          envoie un mail récapitulatif.
- * Version: 2.2 (19/10/2026)
+ * Version: 2.3 (19/10/2026)
+ *   V2.3 : avis de Ben sur ses films (onglet AVIS, 5 niveaux : J'aime pas, Neutre,
+ *          J'aime bien, J'adore, J'adore++) pris en compte dans le calcul des goûts.
  *   V2.2 : (1) note TMDb ignorée si moins de 50 votes (séries toutes neuves à 9.8/10) ;
  *          (2) synopsis coupés proprement (dernier mot entier + « … ») ;
  *          (3) genre moins dominant : réalisateur et acteurs connus passent devant.
@@ -263,6 +265,17 @@ function suggestionsCollecterPlateformeV1_(plateforme, nbJours) {
  * ------------------------------------------------------------ */
 
 const SUGGESTIONS_SEP_V2 = " | ";
+// Avis de Ben (onglet AVIS, écrit par l'app à la suppression d'une fiche ou via
+// "Mon avis"). 1 = J'aime pas, 2 = Neutre, 3 = J'aime bien, 4 = J'adore, 5 = J'adore++.
+// Poids ajoutés au profil : genres, réalisateurs/acteurs (compteur), époque.
+const SUGGESTIONS_AVIS_ONGLET_V3 = "AVIS";
+const SUGGESTIONS_AVIS_POIDS_V3 = {
+  1: { genre: -2.5, nom: -1,   epoque: -1 },
+  2: { genre: 0,    nom: 0,    epoque: 0 },
+  3: { genre: 1,    nom: 0.5,  epoque: 0.5 },
+  4: { genre: 2,    nom: 1,    epoque: 1 },
+  5: { genre: 3,    nom: 2,    epoque: 2 }
+};
 const SUGGESTIONS_VOTES_MIN_V2 = 50; // en dessous, la note TMDb n'est pas montrée ni comptée
 
 function suggestionsIsoV2_(v) {
@@ -323,6 +336,29 @@ function suggestionsLireRetoursV1_() {
     if (verdict === "AJOUTE") retours.ajoutes[cle] = genres;
   }
   return retours;
+}
+
+/** Onglet AVIS -> liste { cle, avis, titre, annee, genres, realisateurs, acteurs }. */
+function suggestionsLireAvisV3_() {
+  const feuille = getSheet_(SUGGESTIONS_AVIS_ONGLET_V3);
+  if (!feuille || feuille.getLastRow() < 2) return [];
+  const valeurs = feuille.getDataRange().getValues();
+  const h = getHeadersMapV4_(valeurs[0]);
+  const liste = [];
+  for (let i = 1; i < valeurs.length; i++) {
+    const avis = Number(get_(valeurs[i], h, "Avis"));
+    const cle = String(get_(valeurs[i], h, "Cle") || "").trim();
+    if (!cle || !SUGGESTIONS_AVIS_POIDS_V3[avis]) continue;
+    liste.push({
+      cle: cle, avis: avis,
+      titre: String(get_(valeurs[i], h, "Titre") || "").trim(),
+      annee: String(get_(valeurs[i], h, "Annee") || "").trim(),
+      genres: suggestionsDecouperGenresV1_(get_(valeurs[i], h, "Genres")),
+      realisateurs: suggestionsNomsV2_(get_(valeurs[i], h, "Realisateur")),
+      acteurs: suggestionsNomsV2_(get_(valeurs[i], h, "Casting")).slice(0, 8)
+    });
+  }
+  return liste;
 }
 
 /**
@@ -388,6 +424,32 @@ function suggestionsConstruireProfilV1_() {
     retours.ajoutes[cle].forEach(function(g) { poids[g] = (poids[g] || 0) + 1; });
   });
 
+  // V2.3 : avis de Ben (films supprimés ou gardés). Un film "J'aime pas" n'est
+  // jamais reproposé ; les autres avis font monter (ou baisser) ses genres,
+  // son réalisateur, ses acteurs et son époque.
+  suggestionsLireAvisV3_().forEach(function(a) {
+    const w = SUGGESTIONS_AVIS_POIDS_V3[a.avis];
+    a.genres.forEach(function(g) { poids[g] = (poids[g] || 0) + w.genre; });
+    a.realisateurs.forEach(function(nom) {
+      const c = suggestionsCleNomV2_(nom);
+      if (!c) return;
+      if (!realisateurs[c]) realisateurs[c] = { n: 0, nom: nom, film: a.titre };
+      realisateurs[c].n += w.nom;
+    });
+    a.acteurs.forEach(function(nom) {
+      const c = suggestionsCleNomV2_(nom);
+      if (!c) return;
+      if (!acteurs[c]) acteurs[c] = { n: 0, nom: nom, film: a.titre };
+      acteurs[c].n += w.nom;
+    });
+    const decAvis = suggestionsDecennieV2_(a.annee);
+    if (decAvis) decennies[decAvis] = (decennies[decAvis] || 0) + w.epoque;
+    if (a.avis === 1) {
+      connus.tmdb[a.cle] = true;
+      if (a.titre) connus.titres[suggestionsNormaliserTitreV1_(a.titre) + ":" + a.annee] = true;
+    }
+  });
+
   let max = 0;
   Object.keys(poids).forEach(function(g) { if (poids[g] > max) max = poids[g]; });
   let maxDec = 0;
@@ -419,10 +481,11 @@ function suggestionsNoterV2_(t, profil) {
   }
 
   // 2. Réalisateur déjà présent dans CinéMaison
-  let bonusReal = 0, raisonReal = "";
+  let bonusReal = 0, raisonReal = "", malus = 0;
   (t.realisateur || []).forEach(function(nom) {
     const info = profil.realisateurs[suggestionsCleNomV2_(nom)];
     if (!info) return;
+    if (info.n < 0) { malus = Math.max(malus, 0.3); return; } // réalisateur d'un film que tu n'aimes pas
     const b = 0.3 * Math.min(2, info.n);
     if (b > bonusReal) { bonusReal = b; raisonReal = "Même réalisateur que « " + info.film + " » (" + nom + ")"; }
   });
@@ -433,10 +496,13 @@ function suggestionsNoterV2_(t, profil) {
   (t.acteurs || []).forEach(function(nom) {
     const info = profil.acteurs[suggestionsCleNomV2_(nom)];
     if (!info) return;
+    if (info.n < 0) { malus += 0.1; return; }
+    if (info.n === 0) return;
     nbActeurs++;
     if (!raisonAct) raisonAct = "Avec " + nom + " (aussi dans « " + info.film + " »)";
   });
   if (nbActeurs) { score += Math.min(0.36, 0.12 * nbActeurs); raisons.push({ poids: 0.8, texte: raisonAct }); }
+  score -= Math.min(0.4, malus); // V2.3 : réalisateur/acteurs de films que tu n'as pas aimés
 
   // 4. Époque
   const dec = suggestionsDecennieV2_(t.annee);
