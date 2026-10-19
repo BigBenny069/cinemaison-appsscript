@@ -6,7 +6,14 @@
  *          (source JustWatch) qui ressemblent à ce qui est déjà dans
  *          CinéMaison. Écrit l'onglet SUGGESTIONS (lu par l'app) et
  *          envoie un mail récapitulatif.
- * Version: 2.0 (19/10/2026)
+ * Version: 2.1 (19/10/2026)
+ *   V2.1 : (1) un titre nouveau pour le script est daté de son arrivée chez JustWatch
+ *          (sauf Canal+, qui arrive en retard : daté du jour où on le voit) ;
+ *          avant, tout ce qui n'était pas déjà dans l'onglet comptait « du jour ».
+ *          (2) mise en forme du mail en styles « en ligne » (Gmail ignore les
+ *          feuilles de style). (3) suggestionsReinitialiserV1 : vide l'onglet
+ *          pour repartir sur de bonnes dates (à lancer une fois après la V2.1).
+ *   V2.0 : (voir ci-dessous)
  *   V2.0 : mail en 2 parties (Nouveautés du jour / Liste hebdo, 10 par plateforme
  *          et par partie), liens signés Ajouter / Pas intéressé / N'aime pas,
  *          notes Letterboxd récupérées via l'app avant l'envoi, critères
@@ -589,9 +596,11 @@ function suggestionsPasserV2_(avecMail) {
           t.acteurs = vieux.acteurs;
           t.creditsOk = vieux.creditsOk;
         } else {
-          // Premier passage de la V2 : on date les titres de leur vraie arrivée
-          // chez JustWatch, sinon tout serait « nouveau aujourd'hui ».
-          t.premiereVue = premierPassage ? (t.jourArrivee || aujourdhui) : aujourdhui;
+          // On date un titre nouveau de sa vraie arrivée chez JustWatch (sinon, au
+          // lancement, tout ce que l'onglet ne connaissait pas serait « du jour »).
+          // Canal+ arrive chez JustWatch avec plusieurs jours de retard : on le date
+          // du jour où on le voit (sauf au tout premier passage).
+          t.premiereVue = (premierPassage || !plateforme.canal) ? (t.jourArrivee || aujourdhui) : aujourdhui;
           t.noteLetterboxd = notesParCle[t.cle] || "";
           t.realisateur = []; t.acteurs = []; t.creditsOk = false;
         }
@@ -845,20 +854,20 @@ function suggestionsLienBrutV2_(l) {
 }
 
 function suggestionsCarteHtmlV2_(t, base, secret) {
-  const bouton = function(libelle, action, classe) {
+  const bouton = function(libelle, action, couleur) {
     const lien = suggestionsLienActionV2_(base, secret, action, t);
-    return lien ? "<a class=\"b " + classe + "\" href=\"" + suggestionsLienBrutV2_(lien) + "\">" + libelle + "</a>" : "";
+    return lien ? "<a href=\"" + suggestionsLienBrutV2_(lien) + "\" style=\"display:inline-block;margin:6px 6px 0 0;padding:4px 9px;border:1px solid;border-radius:14px;color:" + couleur + ";font-size:12px;text-decoration:none\">" + libelle + "</a> " : "";
   };
   const note = suggestionsNoteTexteV2_(t);
-  return "<table class=\"c\"><tr><td class=\"i\">" +
+  return "<table style=\"margin:10px 0;width:100%;border-collapse:collapse;font-size:13px\"><tr><td style=\"width:64px;vertical-align:top\">" +
     (t.affiche ? "<img src=\"" + suggestionsLienBrutV2_(t.affiche) + "\" width=\"56\">" : "") +
-    "</td><td><b>" + suggestionsEchapperV1_(t.titre) + "</b> (" + suggestionsEchapperV1_(t.annee) + ") · " + suggestionsEchapperV1_(t.type) +
-    (note ? " · <span class=\"n\">" + suggestionsEchapperV1_(note) + "</span>" : "") +
-    "<br><span class=\"g\">" + suggestionsEchapperV1_(t.genres.join(" / ")) + "</span>" +
-    "<br><span class=\"r\">" + suggestionsEchapperV1_(t.raison) + "</span>" +
-    "<br>" + suggestionsEchapperV1_(String(t.synopsis).slice(0, 140)) +
-    "<br>" + bouton("Ajouter", "AJ", "ok") + bouton("Pas intéressé", "PI", "pi") + bouton("N'aime pas", "NA", "na") +
-    (t.url ? "<a class=\"v\" href=\"" + suggestionsLienBrutV2_(t.url) + "\">Voir sur " + suggestionsEchapperV1_(t.plateforme) + "</a>" : "") +
+    "</td><td style=\"vertical-align:top\"><b>" + suggestionsEchapperV1_(t.titre) + "</b> (" + suggestionsEchapperV1_(t.annee) + ") · " + suggestionsEchapperV1_(t.type) +
+    (note ? " · <span style=\"color:#b8860b\">" + suggestionsEchapperV1_(note) + "</span>" : "") +
+    "<br><span style=\"color:#888;font-size:12px\">" + suggestionsEchapperV1_(t.genres.join(" / ")) + "</span>" +
+    "<br><span style=\"color:#2a7;font-size:12px\">" + suggestionsEchapperV1_(t.raison) + "</span>" +
+    "<br>" + suggestionsEchapperV1_(String(t.synopsis).slice(0, 120)) +
+    "<br>" + bouton("Ajouter", "AJ", "#1a7f37") + bouton("Pas intéressé", "PI", "#666666") + bouton("N'aime pas", "NA", "#b3261e") +
+    (t.url ? "<a href=\"" + suggestionsLienBrutV2_(t.url) + "\" style=\"display:inline-block;margin-top:6px;font-size:12px;color:#0b57d0\">Voir sur " + suggestionsEchapperV1_(t.plateforme) + "</a>" : "") +
     "</td></tr></table>";
 }
 
@@ -875,11 +884,7 @@ function suggestionsPartieHtmlV2_(titre, liste, base, secret) {
 }
 
 function suggestionsConstruireHtmlV2_(choix, nbJour, nbHebdo, base, secret, coupe) {
-  const style = "<style>body{font-family:Arial,sans-serif}.w{max-width:640px;margin:auto}.c{margin:10px 0;width:100%;border-collapse:collapse;font-size:13px}" +
-    ".i{width:64px;vertical-align:top}.c td{vertical-align:top}.g{color:#888;font-size:12px}.r{color:#2a7;font-size:12px}.n{color:#b8860b}" +
-    ".b{display:inline-block;margin:6px 6px 0 0;padding:4px 9px;border:1px solid;border-radius:14px;font-size:12px;text-decoration:none}" +
-    ".ok{color:#1a7f37}.pi{color:#666}.na{color:#b3261e}.v{display:inline-block;margin-top:6px;font-size:12px;color:#0b57d0}</style>";
-  return "<html><head><meta charset=\"utf-8\">" + style + "</head><body><div class=\"w\">" +
+  return "<html><head><meta charset=\"utf-8\"></head><body style=\"font-family:Arial,sans-serif\"><div style=\"max-width:640px;margin:auto\">" +
     "<h1 style=\"margin-bottom:2px\">Nouveautés pour toi</h1>" +
     "<p style=\"color:#666;margin-top:0\">" + nbJour + " nouveauté(s) aujourd'hui · " + nbHebdo + " sur les jours précédents de la semaine.</p>" +
     suggestionsPartieHtmlV2_("Nouveautés du jour", choix.jour, base, secret) +
@@ -903,7 +908,7 @@ function suggestionsEnvoyerMailV2_(choix, toutes, aujourdhui, limite) {
   let html = suggestionsConstruireHtmlV2_(choix, nbJour, nbHebdo, base, secret, false);
   let coupe = false;
   let reduction = limite;
-  while (html.length > 90000 && reduction > 1) {
+  while (html.length > 95000 && reduction > 1) {
     reduction--;
     coupe = true;
     choix = suggestionsChoisirMailV2_(toutes, aujourdhui, { jour: Math.max(reduction, 3), hebdo: reduction });
@@ -928,6 +933,18 @@ function suggestionsEnvoyerMailV2_(choix, toutes, aujourdhui, limite) {
 /* ------------------------------------------------------------
  * Déclencheur quotidien
  * ------------------------------------------------------------ */
+
+/**
+ * À lancer UNE fois après la V2.1 : vide la liste (pas tes retours « Pas
+ * intéressé / N'aime pas »). Le prochain passage repart sur de bonnes dates.
+ */
+function suggestionsReinitialiserV1() {
+  const feuille = getSheet_(SUGGESTIONS_ONGLET_V1);
+  if (feuille && feuille.getLastRow() > 1) {
+    feuille.getRange(2, 1, feuille.getLastRow() - 1, Math.max(feuille.getLastColumn(), 1)).clearContent();
+  }
+  Logger.log("Onglet SUGGESTIONS vidé. Lance maintenant suggestionsExecuterV1.");
+}
 
 function installerDeclencheurSuggestionsV1() {
   suggestionsInitialiserConfigV1_();
