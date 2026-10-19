@@ -6,7 +6,10 @@
  *          (source JustWatch) qui ressemblent à ce qui est déjà dans
  *          CinéMaison. Écrit l'onglet SUGGESTIONS (lu par l'app) et
  *          envoie un mail récapitulatif.
- * Version: 2.1 (19/10/2026)
+ * Version: 2.2 (19/10/2026)
+ *   V2.2 : (1) note TMDb ignorée si moins de 50 votes (séries toutes neuves à 9.8/10) ;
+ *          (2) synopsis coupés proprement (dernier mot entier + « … ») ;
+ *          (3) genre moins dominant : réalisateur et acteurs connus passent devant.
  *   V2.1 : (1) un titre nouveau pour le script est daté de son arrivée chez JustWatch
  *          (sauf Canal+, qui arrive en retard : daté du jour où on le voit) ;
  *          avant, tout ce qui n'était pas déjà dans l'onglet comptait « du jour ».
@@ -260,6 +263,7 @@ function suggestionsCollecterPlateformeV1_(plateforme, nbJours) {
  * ------------------------------------------------------------ */
 
 const SUGGESTIONS_SEP_V2 = " | ";
+const SUGGESTIONS_VOTES_MIN_V2 = 50; // en dessous, la note TMDb n'est pas montrée ni comptée
 
 function suggestionsIsoV2_(v) {
   if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), "yyyy-MM-dd");
@@ -407,7 +411,7 @@ function suggestionsNoterV2_(t, profil) {
       somme += afin;
       if (afin > 0.25) aimes.push({ g: t.genres[i], a: afin });
     });
-    score = somme / genresCles.length;
+    score = 0.6 * somme / genresCles.length; // V2.2 : le genre ne domine plus (max 0.6)
     aimes.sort(function(a, b) { return b.a - a.a; });
     if (aimes.length) {
       raisons.push({ poids: 0.3, texte: "Parce que tu aimes : " + aimes.slice(0, 3).map(function(r) { return r.g; }).join(", ") });
@@ -419,7 +423,7 @@ function suggestionsNoterV2_(t, profil) {
   (t.realisateur || []).forEach(function(nom) {
     const info = profil.realisateurs[suggestionsCleNomV2_(nom)];
     if (!info) return;
-    const b = 0.25 * Math.min(2, info.n);
+    const b = 0.3 * Math.min(2, info.n);
     if (b > bonusReal) { bonusReal = b; raisonReal = "Même réalisateur que « " + info.film + " » (" + nom + ")"; }
   });
   if (bonusReal) { score += bonusReal; raisons.push({ poids: 1, texte: raisonReal }); }
@@ -432,7 +436,7 @@ function suggestionsNoterV2_(t, profil) {
     nbActeurs++;
     if (!raisonAct) raisonAct = "Avec " + nom + " (aussi dans « " + info.film + " »)";
   });
-  if (nbActeurs) { score += Math.min(0.3, 0.1 * nbActeurs); raisons.push({ poids: 0.8, texte: raisonAct }); }
+  if (nbActeurs) { score += Math.min(0.36, 0.12 * nbActeurs); raisons.push({ poids: 0.8, texte: raisonAct }); }
 
   // 4. Époque
   const dec = suggestionsDecennieV2_(t.annee);
@@ -493,6 +497,11 @@ function suggestionsChargerCreditsV2_(liste) {
         }
         t.realisateur = reals.slice(0, 3);
         t.acteurs = ((d.credits && d.credits.cast) || []).slice(0, 8).map(function(c) { return c.name; });
+        // Note TMDb fiable seulement avec assez de votes (V2.2).
+        const votes = Number(d.vote_count) || 0;
+        t.votesTmdb = votes;
+        if (votes < SUGGESTIONS_VOTES_MIN_V2) t.noteTmdb = "";
+        else if (!t.noteTmdb && d.vote_average) t.noteTmdb = Math.round(d.vote_average * 10) / 10;
         t.creditsOk = true;
         ok++;
       } catch (e) { /* on réessaiera au prochain passage */ }
@@ -841,6 +850,16 @@ function suggestionsLienActionV2_(base, secret, action, t) {
     "&t=" + suggestionsSignerV2_(action, t.cle, t.plateforme, secret);
 }
 
+/** Coupe un texte à `max` caractères sans casser un mot, avec « … ». */
+function suggestionsCouperV2_(texte, max) {
+  const t = String(texte || "").replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  let coupe = t.slice(0, max);
+  const espace = coupe.lastIndexOf(" ");
+  if (espace > max * 0.6) coupe = coupe.slice(0, espace);
+  return coupe.replace(/[\s,;:.\-–—(«"']+$/, "") + "…";
+}
+
 function suggestionsNoteTexteV2_(t) {
   const lb = parseFloat(String(t.noteLetterboxd || "").replace(",", "."));
   if (!isNaN(lb)) return "★ " + lb.toFixed(1) + " Letterboxd";
@@ -865,7 +884,7 @@ function suggestionsCarteHtmlV2_(t, base, secret) {
     (note ? " · <span style=\"color:#b8860b\">" + suggestionsEchapperV1_(note) + "</span>" : "") +
     "<br><span style=\"color:#888;font-size:12px\">" + suggestionsEchapperV1_(t.genres.join(" / ")) + "</span>" +
     "<br><span style=\"color:#2a7;font-size:12px\">" + suggestionsEchapperV1_(t.raison) + "</span>" +
-    "<br>" + suggestionsEchapperV1_(String(t.synopsis).slice(0, 120)) +
+    "<br>" + suggestionsEchapperV1_(suggestionsCouperV2_(t.synopsis, 120)) +
     "<br>" + bouton("Ajouter", "AJ", "#1a7f37") + bouton("Pas intéressé", "PI", "#666666") + bouton("N'aime pas", "NA", "#b3261e") +
     (t.url ? "<a href=\"" + suggestionsLienBrutV2_(t.url) + "\" style=\"display:inline-block;margin-top:6px;font-size:12px;color:#0b57d0\">Voir sur " + suggestionsEchapperV1_(t.plateforme) + "</a>" : "") +
     "</td></tr></table>";
