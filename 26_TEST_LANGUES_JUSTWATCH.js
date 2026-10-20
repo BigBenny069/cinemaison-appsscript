@@ -6,7 +6,10 @@
  *           langues (audio / sous-titres) pour des films de TES fiches,
  *           sur Netflix, et le compare à ce que Prime et Canal+ affichent
  *           vraiment (relevés du 20/10/2026) pour mesurer sa fiabilité.
- * Version : 1.1 (20/10/2026)
+ * Version : 1.2 (20/10/2026)
+ *           (1.2 : recherche du film par TITRE puis rapprochement par numéro TMDb ;
+ *           en 1.0/1.1 le numéro « tm… » était un identifiant interne JustWatch,
+ *           pas le numéro TMDb : les résultats ne concernaient pas les bons films)
  *
  * Aucune écriture dans le Sheet, aucun mail. Tout est dans le
  * Journal d'exécution.
@@ -50,14 +53,22 @@ function jwLanguesRequeteV1_(corps) {
 const JW_LANGUES_FRAGMENT_V1 =
   "offers(country: FR, platform: WEB) { monetizationType presentationType audioLanguages subtitleLanguages package { shortName clearName } }";
 
-function jwLanguesOffresV1_(tmdbId, estSerie) {
-  const id = (estSerie ? "ts" : "tm") + tmdbId;
-  return jwLanguesRequeteV1_({
-    query: "query($id: ID!) { node(id: $id) { ... on Movie { content(country: FR, language: fr) { title originalReleaseYear } " +
-      JW_LANGUES_FRAGMENT_V1 + " } ... on Show { content(country: FR, language: fr) { title originalReleaseYear } " +
-      JW_LANGUES_FRAGMENT_V1 + " } } }",
-    variables: { id: id },
+/** Cherche le film par son titre chez JustWatch, puis garde celui dont le numéro TMDb correspond. */
+function jwLanguesOffresV1_(titre, tmdbId, estSerie) {
+  const corpsNoeud = "id content(country: FR, language: fr) { title originalReleaseYear externalIds { tmdbId } } " + JW_LANGUES_FRAGMENT_V1;
+  const r = jwLanguesRequeteV1_({
+    query: "query($q: String!) { popularTitles(country: FR, first: 8, filter: { searchQuery: $q }) { edges { node { " +
+      "... on Movie { " + corpsNoeud + " } ... on Show { " + corpsNoeud + " } } } } }",
+    variables: { q: titre },
   });
+  r.noeud = null;
+  const edges = r.json && r.json.data && r.json.data.popularTitles ? r.json.data.popularTitles.edges : [];
+  (edges || []).forEach(function(e) {
+    const n = e.node;
+    if (n && n.content && n.content.externalIds && String(n.content.externalIds.tmdbId) === String(tmdbId)) r.noeud = n;
+  });
+  r.nbResultats = (edges || []).length;
+  return r;
 }
 
 function jwLanguesLireFichesV1_() {
@@ -79,14 +90,14 @@ function jwLanguesLireFichesV1_() {
 
 function jwLanguesAfficherV1_(fiche, code, vrai) {
   const estSerie = fiche.type === "Série";
-  const r = jwLanguesOffresV1_(fiche.tmdb, estSerie);
+  const r = jwLanguesOffresV1_(fiche.titre, fiche.tmdb, estSerie);
   const entete = "• " + fiche.titre + " (" + fiche.annee + ") [" + fiche.plateforme + ", TMDb " + fiche.tmdb + "]";
   if (r.code !== 200 || !r.json || r.json.errors) {
     Logger.log(entete + "\n    ✗ HTTP " + r.code + " " + (r.json && r.json.errors ? JSON.stringify(r.json.errors).slice(0, 400) : r.extrait));
     return false;
   }
-  const noeud = r.json.data && r.json.data.node;
-  if (!noeud) { Logger.log(entete + "\n    ✗ JustWatch ne connaît pas ce numéro TMDb"); return true; }
+  const noeud = r.noeud;
+  if (!noeud) { Logger.log(entete + "\n    ✗ pas trouvé chez JustWatch par ce titre (" + r.nbResultats + " résultat(s), aucun avec ce numéro TMDb)"); return true; }
   const offres = (noeud.offers || []).filter(function(o) { return o.package && o.package.shortName === code; });
   Logger.log(entete + (vrai ? "\n    VRAI (page de la plateforme) : " + vrai : ""));
   if (!offres.length) {
@@ -107,10 +118,10 @@ function jwLanguesAfficherV1_(fiche, code, vrai) {
 }
 
 function testLanguesJustWatchV1() {
-  Logger.log("===== TEST LANGUES JUSTWATCH V1.1 =====");
+  Logger.log("===== TEST LANGUES JUSTWATCH V1.2 =====");
 
   // 0. Le champ existe-t-il ? (si non, on liste ce que JustWatch propose sur une offre)
-  const sonde = jwLanguesOffresV1_("949", false);
+  const sonde = jwLanguesOffresV1_("Heat", "949", false);
   if (sonde.json && sonde.json.errors) {
     Logger.log("✗ La demande a été refusée : " + JSON.stringify(sonde.json.errors).slice(0, 500));
     const intro = jwLanguesRequeteV1_({ query: "{ __type(name: \"Offer\") { fields { name } } }" });
