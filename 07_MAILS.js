@@ -393,5 +393,8 @@ function testMailV4() {
   );
 }
 function envoyerMailSyntheseErreurs() {
+  // V1 (21/10/2026) : purge quotidienne du JOURNAL (voir 27_MAINTENANCE_JOURNAL.js).
+  // Ne peut jamais empêcher l'envoi du mail : toute erreur y est absorbée.
+  purgerJournalSiNecessaireV1_();
   return envoyerMailSyntheseErreurs_();
 }
