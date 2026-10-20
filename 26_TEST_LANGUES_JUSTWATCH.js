@@ -6,7 +6,7 @@
  *           langues (audio / sous-titres) pour des films de TES fiches,
  *           sur Netflix, et le compare à ce que Prime et Canal+ affichent
  *           vraiment (relevés du 20/10/2026) pour mesurer sa fiabilité.
- * Version : 1.0 (20/10/2026)
+ * Version : 1.1 (20/10/2026)
  *
  * Aucune écriture dans le Sheet, aucun mail. Tout est dans le
  * Journal d'exécution.
@@ -89,7 +89,16 @@ function jwLanguesAfficherV1_(fiche, code, vrai) {
   if (!noeud) { Logger.log(entete + "\n    ✗ JustWatch ne connaît pas ce numéro TMDb"); return true; }
   const offres = (noeud.offers || []).filter(function(o) { return o.package && o.package.shortName === code; });
   Logger.log(entete + (vrai ? "\n    VRAI (page de la plateforme) : " + vrai : ""));
-  if (!offres.length) { Logger.log("    JustWatch : aucune offre " + code + " trouvée pour la France"); return true; }
+  if (!offres.length) {
+    // V1.1 : on montre tout ce que JustWatch renvoie, pour comprendre pourquoi rien ne correspond
+    const vues = (noeud.offers || []).map(function(o) {
+      return (o.package ? o.package.shortName : "?") + "/" + o.monetizationType +
+        " audio=[" + (o.audioLanguages || []).join(",") + "] st=[" + (o.subtitleLanguages || []).join(",") + "]";
+    });
+    Logger.log("    JustWatch : aucune offre " + code + " -- offres vues (" + vues.length + ") : " + (vues.slice(0, 8).join(" ; ") || "aucune") +
+      (noeud.content ? "  [fiche JW : " + noeud.content.title + " " + noeud.content.originalReleaseYear + "]" : ""));
+    return true;
+  }
   offres.forEach(function(o) {
     Logger.log("    JustWatch (" + o.monetizationType + ", " + o.presentationType + ") : audio=[" + (o.audioLanguages || []).join(", ") +
       "]  sous-titres=[" + (o.subtitleLanguages || []).join(", ") + "]");
@@ -98,7 +107,7 @@ function jwLanguesAfficherV1_(fiche, code, vrai) {
 }
 
 function testLanguesJustWatchV1() {
-  Logger.log("===== TEST LANGUES JUSTWATCH V1.0 =====");
+  Logger.log("===== TEST LANGUES JUSTWATCH V1.1 =====");
 
   // 0. Le champ existe-t-il ? (si non, on liste ce que JustWatch propose sur une offre)
   const sonde = jwLanguesOffresV1_("949", false);
