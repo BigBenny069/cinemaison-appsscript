@@ -110,15 +110,6 @@ function getSheet_(nom) {
   return getSpreadsheet_().getSheetByName(nom);
 }
 
-
-function resetConfigCacheV4_() {
-  CONFIG_CACHE_V4.regles = null;
-  CONFIG_CACHE_V4.connecteurs = null;
-  CONFIG_CACHE_V4.colonnes = null;
-  CONFIG_CACHE_V4.config = null;
-}
-
-
 /**
  * =========================
  * REGLES
@@ -209,12 +200,6 @@ function maxRevisionParCycle_() {
 function maxDisponibilitesParCycle_() {
   return getRegleNumber("MaxConnecteursParCycle", 100);
 }
-
-
-function maxConnecteursParCycle_() {
-  return getRegleNumber("MaxConnecteursParCycle", 100);
-}
-
 
 function maxTentatives_() {
   return getRegleNumber("MaxTentatives", 5);

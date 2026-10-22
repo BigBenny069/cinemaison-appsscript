@@ -72,33 +72,6 @@ function envoyerMailRapport_(sujet, corps, service) {
   }
 }
 
-
-function envoyerMailModificationsDisponibilite_(modifications, source) {
-  if (!modifications || modifications.length === 0) return;
-
-
-  let corps = "CinéMaison - Modifications de disponibilités\n\n";
-  corps += "Source : " + (source || "inconnue") + "\n";
-  corps += "Nombre de modifications : " + modifications.length + "\n\n";
-
-
-  modifications.forEach(function(m) {
-    corps += "• " + (m.titre || "Titre inconnu") + "\n";
-    corps += "  Ancienne date : " + normaliserDate_(m.ancienneDate || "") + "\n";
-    corps += "  Nouvelle date : " + (m.nouvelleDate || "vide") + "\n";
-    corps += "  Ancien statut : " + (m.ancienStatut || "vide") + "\n";
-    corps += "  Nouveau statut : " + (m.nouveauStatut || "vide") + "\n\n";
-  });
-
-
-  envoyerMailRapport_(
-    "CinéMaison - V2 - Dates modifiées (" + (source || "source inconnue") + ")",
-    corps,
-    "ModifsCanal"
-  );
-}
-
-
 /**
  * Envoie uniquement les lignes explicitement marquees ACTIVE.
  *
@@ -355,35 +328,6 @@ function testerFiltrageMailErreursV412() {
     throw new Error("Echec du test de filtrage V4.1.2.");
   }
 }
-
-
-function envoyerMailSyntheseJournal_() {
-  const sheet = getSheet_(SHEETS.JOURNAL);
-  if (!sheet) return;
-
-
-  const data = sheet.getDataRange().getValues();
-  if (data.length <= 1) return;
-
-
-  const lignes = data.slice(Math.max(1, data.length - 30));
-
-
-  let corps = "CinéMaison - Synthèse du journal\n\n";
-
-
-  lignes.forEach(function(r) {
-    corps +=
-      "• " + formatDateFr_(r[0]) + " | " + r[1] + " | " +
-      r[2] + " | " + r[3] + "\n";
-    if (r[4]) corps += "  " + r[4] + "\n";
-    corps += "\n";
-  });
-
-
-  envoyerMailRapport_("CinéMaison - V2 - Synthèse journal", corps, "SyntheseJournal");
-}
-
 
 function testMailV4() {
   envoyerMailRapport_(
