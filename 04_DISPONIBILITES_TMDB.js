@@ -143,23 +143,6 @@ function controleWatchProvidersTMDbV4() {
   }
 }
 
-
-function majDisponibiliteLigne_(sheet, rowNumber, h, tmdbId, type) {
-  const apiKey = lireConfig_("TMDbApiKey", "");
-  if (!apiKey) return;
-
-
-  const result = getWatchProviders_(tmdbId, type, apiKey);
-  const plateformes = result.plateformes || "";
-
-
-  if (plateformes) {
-    setProtected_(sheet, rowNumber, h, "PlateformesDetectees", plateformes, { force: true });
-    setProtected_(sheet, rowNumber, h, "DernierControleDisponibilite", new Date(), { force: true });
-  }
-}
-
-
 function getWatchProviders_(tmdbId, type, apiKeyParam) {
   const apiKey = apiKeyParam || lireConfig_("TMDbApiKey", "");
   if (!apiKey) return { plateformes: "" };

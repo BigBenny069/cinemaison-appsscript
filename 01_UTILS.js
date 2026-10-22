@@ -99,25 +99,6 @@ function setIfBlank_(sheet, rowNumber, h, columnName, value) {
   return true;
 }
 
-
-/**
- * Compatible anciens scripts.
- * Si mode révision = true, on écrit.
- * Sinon on écrit uniquement si vide.
- */
-function writeIfBlankOrRevision_(sheet, rowNumber, h, columnName, value, modeRevision) {
-  if (value === "" || value === null || value === undefined) return false;
-
-
-  if (modeRevision) {
-    return set_(sheet, rowNumber, h, columnName, value);
-  }
-
-
-  return setIfBlank_(sheet, rowNumber, h, columnName, value);
-}
-
-
 /**
  * =========================
  * Écriture protégée V4
@@ -259,21 +240,6 @@ function ymdToDate_(ymd) {
   return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
 }
 
-
-function formatDateFr_(v) {
-  if (!v) return "";
-
-
-  const d = Object.prototype.toString.call(v) === "[object Date]" ? v : new Date(v);
-
-
-  if (isNaN(d.getTime())) return String(v);
-
-
-  return Utilities.formatDate(d, Session.getScriptTimeZone(), "dd/MM/yyyy");
-}
-
-
 /**
  * =========================
  * Valeurs
@@ -289,13 +255,6 @@ function isBlank_(v) {
 function safeTrim_(v) {
   return String(v || "").trim();
 }
-
-
-function toNumber_(v, defaut) {
-  const n = Number(v);
-  return isNaN(n) ? defaut : n;
-}
-
 
 function toBool_(v) {
   const s = String(v || "").trim().toUpperCase();

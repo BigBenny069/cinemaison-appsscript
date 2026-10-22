@@ -1061,38 +1061,6 @@ function creerStatsCanalV41_() {
   };
 }
 
-
-
-
-function journaliserResumeCanalV41_(action, stats, indices) {
-  const premiereLigne = indices.length > 0 ? indices[0] + 1 : "-";
-  const derniereLigne = indices.length > 0
-    ? indices[indices.length - 1] + 1
-    : "-";
-
-
-  const details =
-    "Traités=" + stats.traites +
-    " | Dates=" + stats.datesConnues +
-    " | Plus6Mois=" + stats.plusDe6Mois +
-    " | AVerifier=" + stats.aVerifier +
-    " | NonTrouves=" + (stats.nonTrouves || 0) +
-    " | Erreurs=" + stats.erreurs +
-    " | Changements=" + stats.changements +
-    " | Première ligne=" + premiereLigne +
-    " | Dernière ligne=" + derniereLigne;
-
-
-  journal_("CONNECTEURS", action, "TERMINE", details);
-
-
-  Logger.log("===== " + action + " V4.1 =====");
-  Logger.log(details);
-}
-
-
-
-
 /**
  * ============================================================
  * CONTRÔLE D'UNE FICHE CANAL+
