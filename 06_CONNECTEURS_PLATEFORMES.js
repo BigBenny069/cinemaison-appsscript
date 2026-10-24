@@ -1545,7 +1545,8 @@ function canalEnrichCloudflareV4_(titre, annee, canalContentId) {
 
 
   const response = UrlFetchApp.fetch(url, {
-    muteHttpExceptions: true
+    muteHttpExceptions: true,
+    headers: enTetesWorkerCanalV1_()
   });
 
 
@@ -2550,4 +2551,60 @@ function testSelectionCanalQuotidienneV41() {
 
 
   Logger.log(JSON.stringify(resultat, null, 2));
+}
+
+
+/**
+ * ============================================================
+ * CLÉ D'ACCÈS AU WORKER CLOUDFLARE CANAL+ (ajouté 24/10/2026)
+ * ============================================================
+ * Le Worker cinemaison-canal-proxy exige désormais l'en-tête
+ * "X-CineMaison-Key" sur toutes ses routes (sauf /health et /version).
+ * La clé est stockée dans les propriétés du script (jamais dans le
+ * code ni dans le Sheet) sous le nom CANAL_WORKER_KEY.
+ *
+ * Mise en place (une seule fois) :
+ *   1. Lancer genererCleWorkerCanalV1() -> la clé s'affiche dans le journal.
+ *   2. La copier dans Cloudflare : Worker > Settings > Variables and
+ *      Secrets > CINEMAISON_API_KEY (type Secret).
+ *   3. Lancer testerWorkerCanalV1() pour vérifier.
+ */
+function enTetesWorkerCanalV1_() {
+  const cle = PropertiesService.getScriptProperties().getProperty("CANAL_WORKER_KEY") || "";
+  return cle ? { "X-CineMaison-Key": cle } : {};
+}
+
+
+function genererCleWorkerCanalV1() {
+  const props = PropertiesService.getScriptProperties();
+  const existante = props.getProperty("CANAL_WORKER_KEY");
+  if (existante) {
+    Logger.log("Une clé existe déjà (CANAL_WORKER_KEY). Elle n'est PAS remplacée.");
+    Logger.log("Clé actuelle : " + existante);
+    return;
+  }
+  const cle = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, "");
+  props.setProperty("CANAL_WORKER_KEY", cle);
+  Logger.log("Clé créée et enregistrée dans Apps Script.");
+  Logger.log("COPIE-LA dans Cloudflare (secret CINEMAISON_API_KEY) :");
+  Logger.log(cle);
+}
+
+
+function testerWorkerCanalV1() {
+  const base = String(lireConfig_("CanalWorkerUrl", CANAL_WORKER_BASE_V4)).replace(/\/+$/, "");
+  const cle = PropertiesService.getScriptProperties().getProperty("CANAL_WORKER_KEY") || "";
+  Logger.log("Clé Apps Script présente : " + (cle ? "OUI" : "NON (lancer genererCleWorkerCanalV1)"));
+
+  const sante = UrlFetchApp.fetch(base + "/version", { muteHttpExceptions: true });
+  Logger.log("Worker /version : HTTP " + sante.getResponseCode() + " " + sante.getContentText().slice(0, 100));
+
+  const sans = UrlFetchApp.fetch(base + "/canal/detail?contentId=4778458_50035", { muteHttpExceptions: true });
+  Logger.log("Sans clé -> HTTP " + sans.getResponseCode() + " (attendu 401 une fois le Worker sécurisé)");
+
+  const avec = UrlFetchApp.fetch(base + "/canal/detail?contentId=4778458_50035", {
+    muteHttpExceptions: true,
+    headers: enTetesWorkerCanalV1_()
+  });
+  Logger.log("Avec clé -> HTTP " + avec.getResponseCode() + " (attendu 200)");
 }
