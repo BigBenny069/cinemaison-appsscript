@@ -73,6 +73,64 @@ function envoyerMailRapport_(sujet, corps, service) {
 }
 
 /**
+ * Referme les erreurs d'enrichissement "FILM_LIGNE_<n>" deja guerries.
+ *
+ * Contexte (23/10/2026) : une erreur ponctuelle (ex. ligne ajoutee depuis
+ * l'app au moment exact ou le script travaillait) restait ACTIVE pour toujours
+ * si la fiche etait ensuite enrichie par un autre chemin (relance immediate
+ * depuis l'app) : le cycle periodique ne la retraitait plus, donc ne la
+ * refermait jamais. Ici on la referme seulement si TOUT concorde :
+ *  - la ligne <n> existe encore dans Films ;
+ *  - son titre est bien celui cite dans le message de l'erreur (garde-fou
+ *    si des lignes ont ete supprimees/decalees depuis) ;
+ *  - son EtatEnrichissement est "OK".
+ * Ne touche a rien d'autre. Retourne le nombre d'erreurs refermees.
+ */
+function fermerErreursEnrichissementGuerieesV1_() {
+  try {
+    const feuilleErreurs = getSheet_(SHEETS.ERREURS);
+    const feuilleFilms = getSheet_(SHEETS.FILMS);
+    if (!feuilleErreurs || !feuilleFilms) return 0;
+
+    const suivi = initialiserSuiviErreursV41_(feuilleErreurs);
+    const erreurs = feuilleErreurs.getDataRange().getValues();
+    const aVerifier = {};
+    for (let i = 1; i < erreurs.length; i++) {
+      const r = erreurs[i];
+      if (String(r[suivi.h.Statut] || "").trim().toUpperCase() !== "ACTIVE") continue;
+      if (String(r[suivi.h.Module] || "") !== "ENRICHISSEMENT") continue;
+      const action = String(r[suivi.h.Action] || "");
+      const m = action.match(/^FILM_LIGNE_(\d+)$/);
+      if (!m) continue;
+      const titreCite = String(r[suivi.h.Message] || "").match(/fiche "([^"]+)"/);
+      aVerifier[action] = { ligne: Number(m[1]), titre: titreCite ? titreCite[1] : "" };
+    }
+    const actions = Object.keys(aVerifier);
+    if (actions.length === 0) return 0;
+
+    const donnees = feuilleFilms.getDataRange().getValues();
+    const h = headers_(donnees[0]);
+    let refermees = 0;
+    actions.forEach(function(action) {
+      const a = aVerifier[action];
+      const row = donnees[a.ligne - 1];
+      if (!row || !a.titre) return;
+      const memeTitre = cleanTitle_(get_(row, h, "Titre")) === cleanTitle_(a.titre);
+      const enrichie = safeTrim_(get_(row, h, "EtatEnrichissement")).toUpperCase() === "OK";
+      if (memeTitre && enrichie) {
+        refermees += resoudreErreur_("ENRICHISSEMENT", action);
+        journal_("MAILS", "ERREUR_GUERIE_FERMEE", "OK", action + " | " + a.titre);
+      }
+    });
+    return refermees;
+  } catch (e) {
+    Logger.log("fermerErreursEnrichissementGuerieesV1_ ignoree : " + e);
+    return 0;
+  }
+}
+
+
+/**
  * Envoie uniquement les lignes explicitement marquees ACTIVE.
  *
  * Important :
@@ -82,6 +140,7 @@ function envoyerMailRapport_(sujet, corps, service) {
  * - les statuts HISTORIQUE / RESOLUE / RESOLUE_AUTO sont exclus.
  */
 function envoyerMailSyntheseErreurs_() {
+  fermerErreursEnrichissementGuerieesV1_();
   const sheet = getSheet_(SHEETS.ERREURS);
   if (!sheet) return;
 
