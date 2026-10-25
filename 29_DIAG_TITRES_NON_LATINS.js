@@ -1,7 +1,11 @@
 /**
  * ============================================================
  * 29_DIAG_TITRES_NON_LATINS.gs
- * Version: 1.0 (25/10/2026)
+ * Version: 1.1 (25/10/2026)
+ *
+ * Correctif V1.1 (25/10/2026) : ajout de appliquerTitresNonLatinsV1(), qui
+ * remplace le Titre de ces fiches par le titre anglais proposé (à la demande
+ * de Ben, pour éviter la correction à la main). La liste reste en lecture seule.
  *
  * But : repérer les fiches de l'onglet Films dont le Titre est écrit en
  * caractères non latins (japonais, coréen, russe...), par exemple
@@ -15,29 +19,33 @@
  * (d'après le TMDbID de la fiche). Les corrections se font ensuite à la
  * main dans l'app (bouton d'édition).
  *
- * Utilisation : lancer listerTitresNonLatinsV1().
+ * Utilisation :
+ *  1. listerTitresNonLatinsV1()    -> lecture seule, montre ce qui serait changé.
+ *  2. appliquerTitresNonLatinsV1() -> remplace le Titre (UNIQUEMENT cette
+ *     cellule) par le titre anglais, seulement si TMDb en donne un en
+ *     caractères latins. Chaque changement est loggué "ancien -> nouveau".
+ *     Faire une copie de sauvegarde du Sheet avant.
  * ============================================================
  */
 
 const TITRE_NON_LATIN_REGEX_V1 = /[Ͱ-᷿⺀-꓏가-퟿豈-﫿]/;
 
-function listerTitresNonLatinsV1() {
+/** Cherche les fiches au titre non latin -> [{ ligne, id, actuel, propose }]. propose = "" si aucun titre latin. */
+function collecterTitresNonLatinsV1_() {
   const feuille = getSheet_(SHEETS.FILMS);
   const valeurs = feuille.getDataRange().getValues();
   const h = getHeadersMapV4_(valeurs[0]);
   const apiKey = lireConfig_("TMDbApiKey", "");
-  let trouvees = 0;
+  const liste = [];
 
-  Logger.log("=== Fiches dont le Titre est en caractères non latins (lecture seule) ===");
   for (let i = 1; i < valeurs.length; i++) {
     const titre = String(get_(valeurs[i], h, "Titre") || "").trim();
     if (!titre || !TITRE_NON_LATIN_REGEX_V1.test(titre)) continue;
-    trouvees++;
 
-    const id = get_(valeurs[i], h, "ID");
     const tmdbId = String(get_(valeurs[i], h, "TMDbID") || "").trim();
     const serie = String(get_(valeurs[i], h, "Type") || "").trim() === "Série";
-    let propose = "(TMDbID absent)";
+    let propose = "";
+    let note = "(TMDbID absent)";
 
     if (tmdbId && apiKey) {
       try {
@@ -47,15 +55,46 @@ function listerTitresNonLatinsV1() {
         if (res.getResponseCode() === 200) {
           const d = JSON.parse(res.getContentText());
           const anglais = String((serie ? d.name : d.title) || "").trim();
-          propose = !anglais ? "(aucun)" : (TITRE_NON_LATIN_REGEX_V1.test(anglais) ? "(TMDb n'a pas de titre latin)" : anglais);
+          if (!anglais) note = "(aucun titre anglais)";
+          else if (TITRE_NON_LATIN_REGEX_V1.test(anglais)) note = "(TMDb n'a pas de titre latin)";
+          else { propose = anglais; note = anglais; }
         } else {
-          propose = "(TMDb HTTP " + res.getResponseCode() + ")";
+          note = "(TMDb HTTP " + res.getResponseCode() + ")";
         }
       } catch (e) {
-        propose = "(erreur : " + e.message + ")";
+        note = "(erreur : " + e.message + ")";
       }
     }
-    Logger.log(id + " | ligne " + (i + 1) + " | actuel : " + titre + " | proposé : " + propose);
+    liste.push({ ligne: i + 1, id: get_(valeurs[i], h, "ID"), actuel: titre, propose: propose, note: note, colTitre: h.Titre + 1 });
   }
-  Logger.log(trouvees ? trouvees + " fiche(s) concernée(s)." : "Aucune fiche avec un titre non latin.");
+  return liste;
+}
+
+function listerTitresNonLatinsV1() {
+  const liste = collecterTitresNonLatinsV1_();
+  Logger.log("=== Fiches dont le Titre est en caractères non latins (lecture seule) ===");
+  liste.forEach(function(f) {
+    Logger.log(f.id + " | ligne " + f.ligne + " | actuel : " + f.actuel + " | proposé : " + f.note);
+  });
+  Logger.log(liste.length ? liste.length + " fiche(s) concernée(s)." : "Aucune fiche avec un titre non latin.");
+}
+
+/** Remplace le Titre par le titre anglais (cellule Titre uniquement). */
+function appliquerTitresNonLatinsV1() {
+  const liste = collecterTitresNonLatinsV1_();
+  const feuille = getSheet_(SHEETS.FILMS);
+  let changes = 0;
+  let ignores = 0;
+  liste.forEach(function(f) {
+    if (!f.propose) {
+      ignores++;
+      Logger.log("IGNORÉ " + f.id + " | " + f.actuel + " | " + f.note);
+      return;
+    }
+    feuille.getRange(f.ligne, f.colTitre).setValue(f.propose);
+    changes++;
+    Logger.log("CHANGÉ " + f.id + " | ligne " + f.ligne + " | " + f.actuel + " -> " + f.propose);
+    journal_("TITRES", "TITRE_NON_LATIN_REMPLACE", "OK", f.id + " | " + f.actuel + " -> " + f.propose);
+  });
+  Logger.log("Terminé : " + changes + " titre(s) remplacé(s), " + ignores + " ignoré(s) (pas de titre latin proposé).");
 }
