@@ -115,7 +115,7 @@ function fermerErreursEnrichissementGuerieesV1_() {
       const a = aVerifier[action];
       const row = donnees[a.ligne - 1];
       if (!row || !a.titre) return;
-      const memeTitre = cleanTitle_(get_(row, h, "Titre")) === cleanTitle_(a.titre);
+      const memeTitre = titreComparableErreurV1_(get_(row, h, "Titre")) === titreComparableErreurV1_(a.titre);
       const enrichie = safeTrim_(get_(row, h, "EtatEnrichissement")).toUpperCase() === "OK";
       if (memeTitre && enrichie) {
         refermees += resoudreErreur_("ENRICHISSEMENT", action);
@@ -127,6 +127,77 @@ function fermerErreursEnrichissementGuerieesV1_() {
     Logger.log("fermerErreursEnrichissementGuerieesV1_ ignoree : " + e);
     return 0;
   }
+}
+
+
+/** Titre sans accents, casse, ponctuation ni type d'apostrophe (comparaison tolerante). */
+function titreComparableErreurV1_(t) {
+  return String(t || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+
+/**
+ * Lancable depuis l'editeur : referme maintenant les erreurs d'enrichissement
+ * deja guerries (meme logique que celle appliquee avant le mail du matin).
+ */
+function fermerErreursEnrichissementGuerieesV1() {
+  const n = fermerErreursEnrichissementGuerieesV1_();
+  Logger.log("Erreurs d'enrichissement refermees : " + n);
+}
+
+
+/**
+ * Lancable depuis l'editeur : n'ecrit RIEN. Pour chaque erreur d'enrichissement
+ * FILM_LIGNE_<n> encore ACTIVE, affiche l'etat reel de la fiche concernee et
+ * explique pourquoi elle serait (ou non) refermee.
+ */
+function diagnostiquerErreursEnrichissementActivesV1() {
+  const feuilleErreurs = getSheet_(SHEETS.ERREURS);
+  const feuilleFilms = getSheet_(SHEETS.FILMS);
+  Logger.log("Feuille Films : " + feuilleFilms.getLastRow() + " ligne(s) utilisee(s), " +
+    feuilleFilms.getMaxRows() + " ligne(s) dans la grille, " +
+    feuilleFilms.getLastColumn() + " colonne(s) utilisee(s), " + feuilleFilms.getMaxColumns() + " dans la grille.");
+
+  const suivi = initialiserSuiviErreursV41_(feuilleErreurs);
+  const erreurs = feuilleErreurs.getDataRange().getValues();
+  const donnees = feuilleFilms.getDataRange().getValues();
+  const h = headers_(donnees[0]);
+  let trouvees = 0;
+
+  for (let i = 1; i < erreurs.length; i++) {
+    const r = erreurs[i];
+    if (String(r[suivi.h.Statut] || "").trim().toUpperCase() !== "ACTIVE") continue;
+    if (String(r[suivi.h.Module] || "") !== "ENRICHISSEMENT") continue;
+    const action = String(r[suivi.h.Action] || "");
+    const m = action.match(/^FILM_LIGNE_(\d+)$/);
+    if (!m) continue;
+    trouvees++;
+    const ligne = Number(m[1]);
+    const titreCite = (String(r[suivi.h.Message] || "").match(/fiche "([^"]+)"/) || [])[1] || "";
+    const row = donnees[ligne - 1];
+    Logger.log("--- " + action + " | titre cite : " + titreCite);
+    if (!row) { Logger.log("La ligne " + ligne + " n'existe pas dans Films."); continue; }
+    const titreReel = String(get_(row, h, "Titre") || "");
+    Logger.log("ID : " + get_(row, h, "ID") + " | titre reel : " + titreReel);
+    Logger.log("EtatEnrichissement : " + get_(row, h, "EtatEnrichissement") +
+      " | StatutEnrichissement : " + get_(row, h, "StatutEnrichissement") +
+      " | TMDbID : " + get_(row, h, "TMDbID") +
+      " | Tentatives : " + get_(row, h, "TentativesEnrichissement"));
+    Logger.log("Message : " + get_(row, h, "MessageEnrichissement"));
+    Logger.log("Affiche : " + (get_(row, h, "Affiche") ? "oui" : "NON") +
+      " | Synopsis : " + (get_(row, h, "Synopsis") ? "oui" : "NON") +
+      " | Casting : " + (get_(row, h, "Casting") ? "oui" : "NON"));
+    const memeTitre = titreComparableErreurV1_(titreReel) === titreComparableErreurV1_(titreCite);
+    const ok = safeTrim_(get_(row, h, "EtatEnrichissement")).toUpperCase() === "OK";
+    Logger.log("Titre concordant : " + (memeTitre ? "OUI" : "NON") + " | Etat OK : " + (ok ? "OUI" : "NON") +
+      " => " + (memeTitre && ok ? "serait REFERMEE" : "resterait ACTIVE"));
+  }
+  if (trouvees === 0) Logger.log("Aucune erreur d'enrichissement FILM_LIGNE_ encore ACTIVE.");
 }
 
 
