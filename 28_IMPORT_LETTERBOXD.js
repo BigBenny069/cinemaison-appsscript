@@ -1,7 +1,12 @@
 /**
  * ============================================================
  * 28_IMPORT_LETTERBOXD.gs
- * Version: 1.0 (25/10/2026)
+ * Version: 1.1 (25/10/2026)
+ *
+ * Correctif V1.1 (25/10/2026) : à l'import du CSV, Google Sheets (réglages
+ * français) transformait les notes à demi-point ("3.5") en DATES (3 mai),
+ * d'où 139 notes "illisibles" à la simulation. La lecture reconnaît
+ * maintenant ces dates et retrouve la note (3 mai -> 3,5).
  *
  * But : importer UNE FOIS les notes Letterboxd de Ben (export
  * ratings.csv) dans l'onglet AVIS, pour que les suggestions
@@ -45,9 +50,26 @@ const IMPORT_LB_ENTETES_AVIS_V1 = [
 ];
 const IMPORT_LB_DUREE_MAX_MS_V1 = 4.5 * 60 * 1000;
 
+/**
+ * Lit la note d'une cellule. Piège : Google Sheets (réglages français) transforme
+ * une note comme "3.5" en DATE (3 mai) à l'import du CSV. On la retrouve :
+ * jour + 0,5 si le mois est mai (réglage français : jour.mois), ou
+ * mois + 0,5 si le jour est le 5 (réglage américain : mois.jour).
+ */
+function lireNoteLetterboxdV1_(valeur) {
+  if (valeur instanceof Date && !isNaN(valeur.getTime())) {
+    const jour = valeur.getDate();
+    const mois = valeur.getMonth() + 1;
+    if (mois === 5) return jour + 0.5;
+    if (jour === 5) return mois + 0.5;
+    return NaN;
+  }
+  return Number(String(valeur).replace(",", "."));
+}
+
 /** Note Letterboxd (0,5 à 5) -> avis CinéMaison (1 à 5), ou null si illisible. */
 function conversionNoteLetterboxdV1_(note) {
-  const n = Number(String(note).replace(",", "."));
+  const n = lireNoteLetterboxdV1_(note);
   if (!isFinite(n) || n <= 0 || n > 5) return null;
   if (n <= 2) return 1;
   if (n <= 3) return 2;
