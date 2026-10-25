@@ -1,7 +1,13 @@
 /**
  * ============================================================
  * 29_DIAG_TITRES_NON_LATINS.gs
- * Version: 1.1 (25/10/2026)
+ * Version: 1.2 (25/10/2026)
+ *
+ * Correctif V1.2 (25/10/2026) : appliquerTitresNonLatinsV1 ne remplace plus
+ * que les titres ENTIÈREMENT non latins. Un titre déjà en partie latin
+ * (cas réel FILM0821 : "Nausicaä de la vallée du vent (… 風の谷のナウシカ)")
+ * est laissé tel quel, car le titre anglais de TMDb ("Warriors of the Wind")
+ * aurait été moins bon. Ces fiches restent visibles dans la liste.
  *
  * Correctif V1.1 (25/10/2026) : ajout de appliquerTitresNonLatinsV1(), qui
  * remplace le Titre de ces fiches par le titre anglais proposé (à la demande
@@ -28,6 +34,7 @@
  * ============================================================
  */
 
+const TITRE_A_DES_LETTRES_LATINES_REGEX_V1 = /[A-Za-z\u00C0-\u024F]/;
 const TITRE_NON_LATIN_REGEX_V1 = /[Ͱ-᷿⺀-꓏가-퟿豈-﫿]/;
 
 /** Cherche les fiches au titre non latin -> [{ ligne, id, actuel, propose }]. propose = "" si aucun titre latin. */
@@ -86,6 +93,11 @@ function appliquerTitresNonLatinsV1() {
   let changes = 0;
   let ignores = 0;
   liste.forEach(function(f) {
+    if (TITRE_A_DES_LETTRES_LATINES_REGEX_V1.test(f.actuel)) {
+      ignores++;
+      Logger.log("IGNORÉ (titre déjà en partie latin) " + f.id + " | " + f.actuel);
+      return;
+    }
     if (!f.propose) {
       ignores++;
       Logger.log("IGNORÉ " + f.id + " | " + f.actuel + " | " + f.note);
