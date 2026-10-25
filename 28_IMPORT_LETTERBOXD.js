@@ -1,7 +1,16 @@
 /**
  * ============================================================
  * 28_IMPORT_LETTERBOXD.gs
- * Version: 1.1 (25/10/2026)
+ * Version: 1.2 (25/10/2026)
+ *
+ * Correctif V1.2 (25/10/2026) : 113 films étaient refusés ("douteux") car
+ * Letterboxd donne les titres ANGLAIS ("The Godfather") alors que la
+ * recherche TMDb répond en français ("Le Parrain"). Si le résultat français
+ * n'est pas fiable, on refait une recherche en anglais et on accepte un film
+ * dont le titre est identique (sans accents ni ponctuation) et dont l'année
+ * est la même (+/- 1). Les détails (genres, casting...) restent en français.
+ * Nouveau : reessayerNonTrouvesLetterboxdV1() relance les lignes marquées
+ * NON_TROUVE. Le titre "11:14" (lu comme une heure par Sheets) est aussi géré.
  *
  * Correctif V1.1 (25/10/2026) : à l'import du CSV, Google Sheets (réglages
  * français) transformait les notes à demi-point ("3.5") en DATES (3 mai),
@@ -97,15 +106,52 @@ function lireOngletImportLetterboxdV1_() {
   return { feuille: feuille, h: h, valeurs: valeurs };
 }
 
+function normaliserTitreImportV1_(t) {
+  return String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/** Titre d'une cellule. Piège : "11:14" est lu comme une heure par Sheets. */
+function nomFilmImportV1_(valeur) {
+  if (valeur instanceof Date && !isNaN(valeur.getTime())) {
+    return Utilities.formatDate(valeur, Session.getScriptTimeZone(), "HH:mm");
+  }
+  return safeTrim_(valeur);
+}
+
+/** Recherche en anglais : accepte seulement un titre identique + année à +/- 1. */
+function chercherEnAnglaisImportV1_(titre, annee, apiKey) {
+  const url = "https://api.themoviedb.org/3/search/movie?api_key=" + encodeURIComponent(apiKey) +
+    "&language=en-US&query=" + encodeURIComponent(titre) +
+    (annee ? "&year=" + encodeURIComponent(annee) : "");
+  const res = fetchTMDbAvecRetry_(url, "recherche EN " + titre);
+  if (res.getResponseCode() !== 200) return null;
+  const resultats = parserJsonTMDb_(res.getContentText(), "recherche EN " + titre).results || [];
+  const cible = normaliserTitreImportV1_(titre);
+  const a = Number(annee);
+  const bons = resultats.filter(function(r) {
+    const anneeR = Number(String(r.release_date || "").slice(0, 4));
+    const memeTitre = normaliserTitreImportV1_(r.title) === cible || normaliserTitreImportV1_(r.original_title) === cible;
+    return memeTitre && (!a || !anneeR || Math.abs(anneeR - a) <= 1);
+  });
+  if (!bons.length) return null;
+  bons.sort(function(x, y) { return (y.popularity || 0) - (x.popularity || 0); });
+  return bons[0];
+}
+
 /** Cherche un film sur TMDb. Retourne le détail (valide:true) ou { valide:false, commentaire }. */
 function trouverFilmTmdbPourImportV1_(titre, annee, apiKey) {
   const resultats = rechercherTMDb_(titre, annee, "Film", apiKey);
-  if (!resultats || resultats.length === 0) return { valide: false, commentaire: "aucun résultat TMDb" };
-  const meilleur = choisirMeilleurResultatTMDb_(titre, annee, resultats);
-  if (!meilleur || meilleur.score < 60) {
-    return { valide: false, commentaire: meilleur ? "douteux : " + (meilleur.title || meilleur.name || "") : "aucun résultat fiable" };
+  const meilleur = resultats && resultats.length ? choisirMeilleurResultatTMDb_(titre, annee, resultats) : null;
+  if (meilleur && meilleur.score >= 60) {
+    return chargerDetailTMDbAvecRepli_(meilleur.id, "Film", apiKey, "Import Letterboxd", meilleur.score);
   }
-  return chargerDetailTMDbAvecRepli_(meilleur.id, "Film", apiKey, "Import Letterboxd", meilleur.score);
+  const enAnglais = chercherEnAnglaisImportV1_(titre, annee, apiKey);
+  if (enAnglais) {
+    return chargerDetailTMDbAvecRepli_(enAnglais.id, "Film", apiKey, "Import Letterboxd (titre anglais)", 100);
+  }
+  if (!resultats || resultats.length === 0) return { valide: false, commentaire: "aucun résultat TMDb" };
+  return { valide: false, commentaire: meilleur ? "douteux : " + (meilleur.title || meilleur.name || "") : "aucun résultat fiable" };
 }
 
 /** SIMULATION : ne modifie rien. */
@@ -114,7 +160,7 @@ function simulerImportNotesLetterboxdV1() {
   const compte = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   let illisibles = 0;
   for (let i = 1; i < ctx.valeurs.length; i++) {
-    if (!safeTrim_(ctx.valeurs[i][ctx.h.Name])) continue;
+    if (!nomFilmImportV1_(ctx.valeurs[i][ctx.h.Name])) continue;
     const avis = conversionNoteLetterboxdV1_(ctx.valeurs[i][ctx.h.Rating]);
     if (avis) compte[avis]++; else illisibles++;
   }
@@ -129,7 +175,7 @@ function simulerImportNotesLetterboxdV1() {
   Logger.log("--- Essai sur les 5 premiers films ---");
   let n = 0;
   for (let i = 1; i < ctx.valeurs.length && n < 5; i++) {
-    const titre = safeTrim_(ctx.valeurs[i][ctx.h.Name]);
+    const titre = nomFilmImportV1_(ctx.valeurs[i][ctx.h.Name]);
     if (!titre) continue;
     n++;
     const annee = String(ctx.valeurs[i][ctx.h.Year] || "").trim();
@@ -196,7 +242,7 @@ function importerNotesLetterboxdV1() {
 
   for (let i = 1; i < ctx.valeurs.length; i++) {
     const ligne = ctx.valeurs[i];
-    const titre = safeTrim_(ligne[ctx.h.Name]);
+    const titre = nomFilmImportV1_(ligne[ctx.h.Name]);
     if (!titre || statuts[i]) continue;
 
     if (Date.now() - debut > IMPORT_LB_DUREE_MAX_MS_V1) { coupeParLeTemps = true; restant++; continue; }
@@ -268,4 +314,26 @@ function viderPaquetAvisImportV1_(feuilleAvis, lignes) {
   const debut = feuilleAvis.getLastRow() + 1;
   feuilleAvis.getRange(debut, 1, lignes.length, lignes[0].length).setValues(lignes);
   lignes.length = 0;
+}
+
+
+/**
+ * Relance les lignes marquées NON_TROUVE (par exemple après un correctif de
+ * la recherche) : efface leur statut puis relance l'import. Ne touche pas
+ * aux lignes déjà importées (OK) ni aux avis existants.
+ */
+function reessayerNonTrouvesLetterboxdV1() {
+  const ctx = lireOngletImportLetterboxdV1_();
+  const col = ctx.h.StatutImport;
+  if (col === undefined) { Logger.log("Aucun import précédent : lance d'abord importerNotesLetterboxdV1."); return; }
+  let remis = 0;
+  for (let i = 1; i < ctx.valeurs.length; i++) {
+    const st = String(ctx.valeurs[i][col] || "").trim();
+    if (st === "NON_TROUVE" || st === "ERREUR") {
+      ctx.feuille.getRange(i + 1, col + 1, 1, 2).clearContent();
+      remis++;
+    }
+  }
+  Logger.log(remis + " ligne(s) remise(s) à traiter.");
+  importerNotesLetterboxdV1();
 }
