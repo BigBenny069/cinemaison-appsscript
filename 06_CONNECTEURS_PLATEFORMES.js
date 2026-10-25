@@ -3,10 +3,17 @@
  * CinéMaison V4
  * Script : 06_CONNECTEURS_PLATEFORMES.gs
  * Rôle   : Connecteurs plateformes — CANAL+ uniquement
- * Version: 4.8.6
+ * Version: 4.8.7
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs,
- *               Worker Cloudflare CANAL+ V3.6
+ *               Worker Cloudflare CANAL+ V3.7
  * ============================================================
+ *
+ * V4.8.7 (24/10/2026) : le Worker Cloudflare CANAL+ (V3.7.0) exige
+ * maintenant l'en-tête X-CineMaison-Key. La clé est lue dans la propriété
+ * de script CANAL_WORKER_KEY (enTetesWorkerCanalV1_) et envoyée avec chaque
+ * appel /canal/enrich. Nouvelles fonctions à lancer à la main :
+ * genererCleWorkerCanalV1 (crée la clé) et testerWorkerCanalV1 (vérifie).
+ * Retrait de la fonction inutilisée journaliserResumeCanalV41_ (audit).
  *
  * V4.8.6 (11/10/2026) : reclasserVodSansDateCanalV1 retourne aussi la liste des
  * fiches reclassées (mail du bouton Réglages).

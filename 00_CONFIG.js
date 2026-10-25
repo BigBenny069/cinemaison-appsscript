@@ -3,7 +3,14 @@
  * CinéMaison V4
  * Script : 00_CONFIG.gs
  * Rôle   : Configuration centrale
- * Version: 4.0.4
+ * Version: 4.0.5
+ *
+ * Correctif 2026-10-24 (V4.0.5) :
+ *   - nettoyage (audit) : l'onglet ARCHITECTURE n'est plus déclaré
+ *     (SHEETS.ARCHITECTURE, SHEET_ARCHITECTURE) ni exigé par
+ *     verifierArchitecture() ; retrait de 2 fonctions inutilisées
+ *     (resetConfigCacheV4_, maxConnecteursParCycle_). Aucun changement
+ *     de comportement.
  *
  * Correctif 2026-09-06 (V4.0.4) :
  *   - renommage ajouterServicesEmailManquantsV1_ -> sans underscore

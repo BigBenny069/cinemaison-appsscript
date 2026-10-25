@@ -3,8 +3,12 @@
  * CinéMaison V4
  * Script : 01_UTILS.gs
  * Rôle   : Utilitaires communs sécurisés
- * Version: 4.2.2
+ * Version: 4.2.3
  * ============================================================
+ *
+ * Correctif 4.2.3 (22/10/2026) : nettoyage (audit) -- retrait de 3
+ * fonctions inutilisées (writeIfBlankOrRevision_, toNumber_,
+ * formatDateFr_). Aucun changement de comportement.
  *
  * Correctif 4.2.2 (25/09/2026) : setProtected_/setIfChanged_/
  * setIfBlank_ n'avaient aucune résilience face aux aléas transitoires

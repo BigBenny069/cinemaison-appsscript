@@ -3,9 +3,19 @@
  * CinéMaison V4
  * Script : 07_MAILS.gs
  * Rôle   : Notifications email
- * Version: 4.1.5
+ * Version: 4.1.6
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs
  * ============================================================
+ *
+ * Correctif V4.1.6 (25/10/2026) :
+ * - avant le mail "Erreurs encore actives", les erreurs d'enrichissement
+ *   FILM_LIGNE_<n> déjà guéries sont refermées (fermerErreursEnrichissementGuerieesV1_ :
+ *   ligne et titre concordants -- comparaison tolérante aux apostrophes,
+ *   accents et majuscules -- et EtatEnrichissement "OK") ;
+ * - nouvelles fonctions à lancer à la main : diagnostiquerErreursEnrichissementActivesV1
+ *   (n'écrit rien) et fermerErreursEnrichissementGuerieesV1 ;
+ * - nettoyage (22/10/2026) : retrait de 2 fonctions inutilisées
+ *   (envoyerMailModificationsDisponibilite_, envoyerMailSyntheseJournal_).
  *
  * Correctif V4.1.5 (05/09/2026) :
  * - envoyerMailRapport_ accepte désormais un 3e paramètre "service"
