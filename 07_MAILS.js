@@ -3,9 +3,16 @@
  * CinéMaison V4
  * Script : 07_MAILS.gs
  * Rôle   : Notifications email
- * Version: 4.1.6
+ * Version: 4.1.7
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs
  * ============================================================
+ *
+ * Correctif V4.1.7 (25/10/2026) : la fermeture automatique des erreurs
+ * d'enrichissement cherche maintenant la fiche par son titre dans toute la
+ * feuille (le numéro de ligne de l'erreur devient faux quand des lignes sont
+ * supprimées ; cas réel : "Lumière, l'aventure continue", ligne 1034, fiche
+ * supprimée ensuite, la ligne 1034 contenant un autre film). Fiche supprimée
+ * ou enrichie -> erreur refermée ; fiche présente mais non enrichie -> reste active.
  *
  * Correctif V4.1.6 (25/10/2026) :
  * - avant le mail "Erreurs encore actives", les erreurs d'enrichissement
@@ -90,10 +97,10 @@ function envoyerMailRapport_(sujet, corps, service) {
  * si la fiche etait ensuite enrichie par un autre chemin (relance immediate
  * depuis l'app) : le cycle periodique ne la retraitait plus, donc ne la
  * refermait jamais. Ici on la referme seulement si TOUT concorde :
- *  - la ligne <n> existe encore dans Films ;
- *  - son titre est bien celui cite dans le message de l'erreur (garde-fou
- *    si des lignes ont ete supprimees/decalees depuis) ;
- *  - son EtatEnrichissement est "OK".
+ *  - la fiche (cherchee par son TITRE, car le numero de ligne peut avoir
+ *    change si des lignes ont ete supprimees) est enrichie ("OK"), ou bien
+ *    elle n'existe plus du tout (supprimee depuis). Voir
+ *    verdictErreurEnrichissementV1_.
  * Ne touche a rien d'autre. Retourne le nombre d'erreurs refermees.
  */
 function fermerErreursEnrichissementGuerieesV1_() {
@@ -123,13 +130,11 @@ function fermerErreursEnrichissementGuerieesV1_() {
     let refermees = 0;
     actions.forEach(function(action) {
       const a = aVerifier[action];
-      const row = donnees[a.ligne - 1];
-      if (!row || !a.titre) return;
-      const memeTitre = titreComparableErreurV1_(get_(row, h, "Titre")) === titreComparableErreurV1_(a.titre);
-      const enrichie = safeTrim_(get_(row, h, "EtatEnrichissement")).toUpperCase() === "OK";
-      if (memeTitre && enrichie) {
+      if (!a.titre) return;
+      const verdict = verdictErreurEnrichissementV1_(donnees, h, a.titre);
+      if (verdict.referme) {
         refermees += resoudreErreur_("ENRICHISSEMENT", action);
-        journal_("MAILS", "ERREUR_GUERIE_FERMEE", "OK", action + " | " + a.titre);
+        journal_("MAILS", "ERREUR_GUERIE_FERMEE", "OK", action + " | " + a.titre + " | " + verdict.raison);
       }
     });
     return refermees;
@@ -137,6 +142,29 @@ function fermerErreursEnrichissementGuerieesV1_() {
     Logger.log("fermerErreursEnrichissementGuerieesV1_ ignoree : " + e);
     return 0;
   }
+}
+
+
+/**
+ * Decide si l'erreur d'une fiche peut etre refermee. Le numero de ligne de
+ * l'erreur n'est plus fiable (des lignes peuvent etre supprimees/decalees
+ * depuis), donc on cherche la fiche par son TITRE dans toute la feuille :
+ *  - aucune fiche de ce titre : elle a ete supprimee depuis -> on referme ;
+ *  - au moins une fiche de ce titre est enrichie ("OK") -> on referme ;
+ *  - sinon (fiche presente mais pas enrichie) -> l'erreur reste active.
+ */
+function verdictErreurEnrichissementV1_(donnees, h, titreCite) {
+  const cible = titreComparableErreurV1_(titreCite);
+  let trouvees = 0;
+  let enrichies = 0;
+  for (let i = 1; i < donnees.length; i++) {
+    if (titreComparableErreurV1_(get_(donnees[i], h, "Titre")) !== cible) continue;
+    trouvees++;
+    if (safeTrim_(get_(donnees[i], h, "EtatEnrichissement")).toUpperCase() === "OK") enrichies++;
+  }
+  if (trouvees === 0) return { referme: true, raison: "fiche supprimee depuis" };
+  if (enrichies > 0) return { referme: true, raison: "fiche enrichie (OK)" };
+  return { referme: false, raison: trouvees + " fiche(s) de ce titre mais aucune enrichie" };
 }
 
 
@@ -202,10 +230,8 @@ function diagnostiquerErreursEnrichissementActivesV1() {
     Logger.log("Affiche : " + (get_(row, h, "Affiche") ? "oui" : "NON") +
       " | Synopsis : " + (get_(row, h, "Synopsis") ? "oui" : "NON") +
       " | Casting : " + (get_(row, h, "Casting") ? "oui" : "NON"));
-    const memeTitre = titreComparableErreurV1_(titreReel) === titreComparableErreurV1_(titreCite);
-    const ok = safeTrim_(get_(row, h, "EtatEnrichissement")).toUpperCase() === "OK";
-    Logger.log("Titre concordant : " + (memeTitre ? "OUI" : "NON") + " | Etat OK : " + (ok ? "OUI" : "NON") +
-      " => " + (memeTitre && ok ? "serait REFERMEE" : "resterait ACTIVE"));
+    const v = verdictErreurEnrichissementV1_(donnees, h, titreCite);
+    Logger.log("Verdict : " + (v.referme ? "serait REFERMEE" : "resterait ACTIVE") + " (" + v.raison + ")");
   }
   if (trouvees === 0) Logger.log("Aucune erreur d'enrichissement FILM_LIGNE_ encore ACTIVE.");
 }
