@@ -7,7 +7,14 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.31
+ * Version: 2.32
+ *
+ * Correctif V2.32 (26/10/2026) : nouvelle action doPost "alertePageIntrouvableStreaming"
+ * (collecteurs Prime/Netflix/Disney+/Shadowz/Paramount+) : une fiche encore dans
+ * "Ma liste" dont la page répond 404 ou n'affiche rien de lisible (cas "Breakdown"
+ * sur Paramount+) remonte désormais dans un mail dédié. Une même fiche n'est
+ * resignalée qu'au bout de 7 jours (mémoire dans les propriétés du script), sauf si
+ * elle disparaît de l'alerte puis revient. Voir traiterAlertePageIntrouvableStreamingV1_.
  *
  * Correctif V2.31 (26/10/2026) : nouvelle action doPost "renommerTitresPlateforme"
  * (remplace le Titre de fiches par le titre exact de la plateforme, après
@@ -479,6 +486,12 @@ function doPost(e) {
 
     if (corps.action === "alerteTypeIncoherentStreaming") {
       return traiterAlerteTypeIncoherentStreamingV1_(corps);
+    }
+
+    // NOUVEAU (26/10/2026) -- page introuvable (404) ou vide, voir
+    // traiterAlertePageIntrouvableStreamingV1_.
+    if (corps.action === "alertePageIntrouvableStreaming") {
+      return traiterAlertePageIntrouvableStreamingV1_(corps);
     }
 
     if (corps.action === "alerteAnomalieScraping") {
@@ -1216,6 +1229,111 @@ function traiterAlerteStatutInconnuStreamingV1_(corps) {
   );
 
   return reponseJsonWebhook_({ ok: true, mailEnvoye: !!destinataires, nombreFiches: fiches.length });
+}
+
+/**
+ * NOUVEAU (26/10/2026) -- Reçoit { secret, action: "alertePageIntrouvableStreaming",
+ * plateforme, fiches: [{ id, titre, url, motif }, ...] } -- fiches qui sont
+ * toujours dans "Ma liste" de la plateforme mais dont la page répond 404 ou
+ * n'affiche rien de lisible (ni année ni durée) : très probablement retirées
+ * du catalogue sans que la plateforme les enlève de la liste (cas "Breakdown"
+ * sur Paramount+, 26/10/2026, jamais remonté avant). "id" est l'ID CinéMaison
+ * quand la fiche est déjà rattachée (sinon vide).
+ *
+ * Mail de vérification manuelle, rien n'est jamais modifié ni supprimé ici.
+ * Pour ne pas renvoyer le même mail à chaque contrôle, une fiche déjà
+ * signalée n'est resignalée qu'au bout de DELAI_RAPPEL_PAGES_INTROUVABLES_JOURS_V1
+ * jours (mémoire dans les propriétés du script) ; si elle disparaît de
+ * l'alerte (page revenue) puis revient, elle est de nouveau signalée tout de suite.
+ */
+const DELAI_RAPPEL_PAGES_INTROUVABLES_JOURS_V1 = 7;
+
+function echapperHtmlPagesIntrouvablesV1_(texte) {
+  return String(texte == null ? "" : texte)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function traiterAlertePageIntrouvableStreamingV1_(corps) {
+  const plateforme = String(corps.plateforme || "").trim();
+  const fiches = Array.isArray(corps.fiches) ? corps.fiches : [];
+  if (!plateforme || fiches.length === 0) {
+    return reponseJsonWebhook_({ ok: false, error: "plateforme ou fiches vide" }, 400);
+  }
+
+  // Mémoire des fiches déjà signalées (clé = ID CinéMaison, sinon titre).
+  const proprietes = PropertiesService.getScriptProperties();
+  const cleMemoire = "PAGES_INTROUVABLES_" + plateforme.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+  let memoire = {};
+  try { memoire = JSON.parse(proprietes.getProperty(cleMemoire) || "{}") || {}; } catch (e) { memoire = {}; }
+  const maintenant = Date.now();
+  const delaiMs = DELAI_RAPPEL_PAGES_INTROUVABLES_JOURS_V1 * 24 * 60 * 60 * 1000;
+  const aSignaler = [];
+  const nouvelleMemoire = {};
+  fiches.forEach(function(f) {
+    const cle = String(f.id || f.titre || "").trim();
+    if (!cle) return;
+    const dernierEnvoi = Number(memoire[cle]) || 0;
+    if (!dernierEnvoi || maintenant - dernierEnvoi >= delaiMs) {
+      aSignaler.push(f);
+      nouvelleMemoire[cle] = maintenant;
+    } else {
+      nouvelleMemoire[cle] = dernierEnvoi;
+    }
+  });
+
+  if (aSignaler.length === 0) {
+    journal_("CONTROLE_" + plateforme, "PAGE_INTROUVABLE", "IGNORE_DEJA_SIGNALEES",
+      fiches.length + " fiche(s) déjà signalée(s) depuis moins de " + DELAI_RAPPEL_PAGES_INTROUVABLES_JOURS_V1 + " jours");
+    return reponseJsonWebhook_({ ok: true, mailEnvoye: false, dejaSignalees: fiches.length });
+  }
+
+  const baseUrl = "https://cinemaison-v2.vercel.app";
+  const destinataires = destinatairesPourService_("AjoutAutoPrime");
+  if (destinataires) {
+    const lignes = aSignaler.map(function(f) {
+      const titre = echapperHtmlPagesIntrouvablesV1_(f.titre || "?");
+      const lienTitre = f.url
+        ? '<a href="' + echapperHtmlPagesIntrouvablesV1_(f.url) + '" style="color:#B5622B;text-decoration:none">' + titre + '</a>'
+        : titre;
+      const lienFiche = f.id
+        ? ' &middot; <a href="' + baseUrl + "/?film=" + encodeURIComponent(f.id) + '&edit=1" style="color:#9A9182">' +
+          echapperHtmlPagesIntrouvablesV1_(f.id) + ' (ouvrir la fiche)</a>'
+        : ' &middot; <span style="color:#9A9182">pas encore dans CinéMaison</span>';
+      return '<tr><td style="padding:8px 0;border-bottom:1px solid #EFE7D6;font-family:Arial,sans-serif;font-size:13px;color:#3A2E22">' +
+        '<strong>' + lienTitre + '</strong>' + lienFiche +
+        '<div style="color:#9A9182;font-size:12px;margin-top:2px">' + echapperHtmlPagesIntrouvablesV1_(f.motif || "page vide ou introuvable") + '</div>' +
+        '</td></tr>';
+    }).join("");
+    const corpsHtml =
+      '<!DOCTYPE html><html><head><meta charset="UTF-8"></head>' +
+      '<body style="margin:0;padding:0;background:#F5EFE0"><div style="background:#F5EFE0;padding:24px 12px">' +
+      '<div style="background:#FFFBF2;border-radius:8px;padding:28px 22px;max-width:480px;margin:0 auto;font-family:Georgia,serif">' +
+      '<div style="font-size:22px;font-weight:bold;color:#3A2E22">CINÉ<span style="color:#B5622B">MAISON</span></div>' +
+      '<div style="font-size:11px;letter-spacing:1.5px;color:#B5622B;margin-top:4px;font-family:Arial,sans-serif">' +
+      echapperHtmlPagesIntrouvablesV1_(plateforme) + ' &middot; PAGE INTROUVABLE OU VIDE</div>' +
+      '<div style="border-top:1px solid #E3D9C4;margin:16px 0"></div>' +
+      '<p style="font-size:13px;color:#9A9182;font-family:Arial,sans-serif">' +
+      aSignaler.length + ' fiche(s) encore dans ta liste, mais dont la page répond 404 ou n\'affiche rien de lisible : ' +
+      'le film a probablement été retiré de la plateforme. À vérifier, puis à retirer de ta liste et de CinéMaison si c\'est le cas.</p>' +
+      '<table role="presentation" width="100%" style="border-collapse:collapse">' + lignes + '</table>' +
+      '</div></div></body></html>';
+    MailApp.sendEmail({
+      to: destinataires,
+      subject: "CinéMaison - V2 - " + plateforme + " : " + aSignaler.length + " page(s) introuvable(s) ou vide(s)",
+      htmlBody: corpsHtml,
+    });
+    // Mémoire mise à jour seulement si le mail est bien parti.
+    proprietes.setProperty(cleMemoire, JSON.stringify(nouvelleMemoire));
+  }
+
+  journal_(
+    "CONTROLE_" + plateforme,
+    "PAGE_INTROUVABLE",
+    destinataires ? "OK" : "IGNORE_SANS_DESTINATAIRE",
+    aSignaler.length + " fiche(s) : " + aSignaler.map(function(f) { return f.titre + " (" + (f.motif || "?") + ")"; }).join(", ")
+  );
+
+  return reponseJsonWebhook_({ ok: true, mailEnvoye: !!destinataires, nombreFiches: aSignaler.length });
 }
 
 /**
