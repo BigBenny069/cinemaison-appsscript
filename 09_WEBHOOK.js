@@ -7,7 +7,12 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.30
+ * Version: 2.31
+ *
+ * Correctif V2.31 (26/10/2026) : nouvelle action doPost "renommerTitresPlateforme"
+ * (remplace le Titre de fiches par le titre exact de la plateforme, après
+ * validation de Ben dans l'outil local titres-plateformes.js), voir
+ * 30_TITRES_PLATEFORME.js.
  *
  * Correctif V2.30 (18/10/2026) : plateforme PARAMOUNT (Paramount+) ajoutée aux
  * listes autorisées (page de détail du contrôle, libellé des mails de suggestions).
@@ -436,6 +441,12 @@ function doPost(e) {
     // (Réglages > CONTRÔLE CANAL+), voir 22_ACTIONS_CANAL_APP.js.
     if (["canalRecontrolerAVerifier", "canalControleComplet", "canalEtatControle", "canalArreterControle", "canalReclasserVod", "primeNettoyageApercu", "primeNettoyageAppliquer"].indexOf(corps.action) !== -1) {
       return traiterCanalActionAppV1_(corps);
+    }
+
+    // NOUVEAU (26/10/2026) -- renommage de fiches validé dans l'outil local
+    // titres-plateformes.js, voir 30_TITRES_PLATEFORME.js.
+    if (corps.action === "renommerTitresPlateforme") {
+      return traiterRenommerTitresPlateformeV1_(corps);
     }
 
     if (corps.action === "alerteSuggestionsPrime") {
