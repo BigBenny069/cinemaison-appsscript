@@ -3,10 +3,16 @@
  * CinéMaison V4
  * Script : 06_CONNECTEURS_PLATEFORMES.gs
  * Rôle   : Connecteurs plateformes — CANAL+ uniquement
- * Version: 4.8.7
+ * Version: 4.9.0
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs,
  *               Worker Cloudflare CANAL+ V3.7
  * ============================================================
+ *
+ * V4.9.0 (27/10/2026) -- Correctif : les changements de STATUT d'accès Canal+
+ * ne s'écrivent plus tout seuls, ils sont PROPOSÉS (onglet CANAL_PROPOSITIONS)
+ * puis validés ligne par ligne par mail (voir 31_CANAL_PROPOSITIONS_STATUTS.js).
+ * Règles : _40099 -> VOD ; vraie date sur une fiche Indispo -> Inclus ; fiche
+ * Inclus introuvable chez Canal+ -> Indispo. Les dates restent immédiates.
  *
  * V4.8.7 (24/10/2026) : le Worker Cloudflare CANAL+ (V3.7.0) exige
  * maintenant l'en-tête X-CineMaison-Key. La clé est lue dans la propriété
@@ -657,6 +663,13 @@ function terminerControleCompletCanalV4_(etat) {
     envoyerMailBilanFinParcoursCanalV4_(etat, contextePourBilan.sheet, contextePourBilan.h);
   }
 
+  // V4.9.0 : mail des changements de statut proposés (cases à choisir).
+  try {
+    envoyerMailPropositionsCanalV1_(false);
+  } catch (errProp) {
+    erreur_("CONNECTEURS", "CANAL_PROPOSITIONS", "Mail des propositions de statut", String(errProp));
+  }
+
 
   // Une action globale CANAL_COMPLET n'est close qu'après le
   // parcours intégral et seulement si aucune fiche n'a échoué.
@@ -1032,7 +1045,10 @@ function reclasserVodSansDateCanalV1() {
     const vodParId = estContentIdVodCanalV1_(ligne[h.CanalContentId]);
     if (estStatutAccesVodCanalV1_(ligne[h.StatutAcces]) || vodParId) {
       if (vodParId && !estStatutAccesVodCanalV1_(ligne[h.StatutAcces])) {
-        setProtected_(sheet, i + 1, h, "StatutAcces", "VOD", { force: true });
+        enregistrerPropositionCanalV1_(
+          ligne[h.ID], cleanTitle_(ligne[h.Titre]), ligne[h.Annee], ligne[h.StatutAcces],
+          "VOD", "L'identifiant Canal se termine par _40099 (Canal VOD) : location/achat à l'unité."
+        );
       }
       setProtected_(sheet, i + 1, h, "StatutDisponibiliteAuto", "VOD_SANS_DATE", { force: true });
       setProtected_(
@@ -1100,6 +1116,14 @@ function controleCanalLigneV4_(sheet, rowNumber, row, h) {
     // invalide, etc.), ce qui aurait déclenché une fausse alerte.
     if (api && api.error === "NO_MATCH") {
       appliquerNonTrouveCanalV4_(sheet, rowNumber, h);
+
+      // V4.9.0 : fiche "Inclus" que Canal+ ne connaît plus -> proposition "Indispo".
+      if (String(get_(row, h, "StatutAcces") || "").trim() === "Inclus") {
+        enregistrerPropositionCanalV1_(
+          get_(row, h, "ID"), titre, annee, "Inclus", "Indispo",
+          "Introuvable dans le catalogue Canal+ : probablement retiré."
+        );
+      }
 
       Logger.log(
         "NON_TROUVE_CANAL | ligne " + rowNumber + " | " + titre +
@@ -1240,6 +1264,20 @@ function controleCanalLigneV4_(sheet, rowNumber, row, h) {
 
     const changementDate = !sameDate_(ancienneDate, nouvelleDate);
 
+    // V4.9.0 : vraie date de fin (aujourd'hui ou plus tard) sur une fiche
+    // "Indispo" -> proposition "Inclus" (validée par mail, jamais écrite seule).
+    const debutJourCanal = new Date();
+    debutJourCanal.setHours(0, 0, 0, 0);
+    if (
+      String(get_(row, h, "StatutAcces") || "").trim() === "Indispo" &&
+      dateObjet.getTime() >= debutJourCanal.getTime()
+    ) {
+      enregistrerPropositionCanalV1_(
+        get_(row, h, "ID"), titre, annee, "Indispo", "Inclus",
+        "Canal+ affiche de nouveau la fiche avec une date de fin (" + nouvelleDate + ")."
+      );
+    }
+
 
     if (changementDate) {
       setProtected_(
@@ -1364,7 +1402,10 @@ function controleCanalLigneV4_(sheet, rowNumber, row, h) {
     // renseigné automatiquement (jamais l'inverse : on ne retire pas un
     // "VOD" posé à la main).
     if (vodParId && !estStatutAccesVodCanalV1_(get_(row, h, "StatutAcces"))) {
-      setProtected_(sheet, rowNumber, h, "StatutAcces", "VOD", { force: true });
+      enregistrerPropositionCanalV1_(
+        get_(row, h, "ID"), titre, annee, get_(row, h, "StatutAcces"),
+        "VOD", "L'identifiant Canal se termine par _40099 (Canal VOD) : location/achat à l'unité."
+      );
     }
 
     setProtected_(
