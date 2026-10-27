@@ -7,7 +7,11 @@
  *          cycle programmé toutes les 5 min, donc sans avoir besoin
  *          d'un PC allumé ou du Sheet ouvert). Reçoit aussi les réglages
  *          du résumé quotidien par email (V1.1).
- * Version: 2.32
+ * Version: 2.33
+ *
+ * Correctif V2.33 (27/10/2026) : nouvelles actions doPost "canalPropositionsLister" et
+ * "canalPropositionsAppliquer" (page de choix des changements de statut Canal+, voir
+ * 31_CANAL_PROPOSITIONS_STATUTS.js). Nécessite un NOUVEAU DÉPLOIEMENT de l'application web.
  *
  * Correctif V2.32 (26/10/2026) : nouvelle action doPost "alertePageIntrouvableStreaming"
  * (collecteurs Prime/Netflix/Disney+/Shadowz/Paramount+) : une fiche encore dans
@@ -452,6 +456,14 @@ function doPost(e) {
 
     // NOUVEAU (26/10/2026) -- renommage de fiches validé dans l'outil local
     // titres-plateformes.js, voir 30_TITRES_PLATEFORME.js.
+    if (corps.action === "canalPropositionsLister") {
+      return traiterCanalPropositionsListerV1_();
+    }
+
+    if (corps.action === "canalPropositionsAppliquer") {
+      return traiterCanalPropositionsAppliquerV1_(corps);
+    }
+
     if (corps.action === "renommerTitresPlateforme") {
       return traiterRenommerTitresPlateformeV1_(corps);
     }
