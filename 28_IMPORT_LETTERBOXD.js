@@ -1,7 +1,14 @@
 /**
  * ============================================================
  * 28_IMPORT_LETTERBOXD.gs
- * Version: 1.2 (25/10/2026)
+ * Version: 1.3 (27/10/2026)
+ *
+ * Correctif V1.3 (27/10/2026) : nouvelle répartition des notes voulue par Ben
+ * (voir CONVERSION). Nouveau : simulerReconversionAvisLetterboxdV1() (ne
+ * modifie rien : liste les avis qui changeraient) puis
+ * reconvertirAvisLetterboxdV1() qui met à jour, dans AVIS, UNIQUEMENT les
+ * avis venant de l'import (colonne Origine = "letterboxd"). Un avis donné à la
+ * main dans l'app (Origine "suppression" ou "fiche") n'est jamais modifié.
  *
  * Correctif V1.2 (25/10/2026) : 113 films étaient refusés ("douteux") car
  * Letterboxd donne les titres ANGLAIS ("The Godfather") alors que la
@@ -34,11 +41,11 @@
  *     relancée jusqu'à "TERMINÉ" (garde de temps Apps Script ; elle
  *     reprend là où elle s'est arrêtée).
  *
- * CONVERSION (choix de Ben, 25/10/2026) :
- *   1,5 et 2     -> 1  J'aime pas      (⚠ jamais reproposé en suggestion)
- *   2,5 et 3     -> 2  Neutre
- *   3,5 et 4     -> 3  J'aime bien
- *   4,5          -> 4  J'adore
+ * CONVERSION (nouvelle répartition de Ben, 27/10/2026 ; avant : 1,5-2 / 2,5-3 / 3,5-4 / 4,5 / 5) :
+ *   0,5 à 1,5    -> 1  J'aime pas      (⚠ jamais reproposé en suggestion)
+ *   2 à 2,5      -> 2  Neutre
+ *   3 à 3,5      -> 3  J'aime bien
+ *   4 à 4,5      -> 4  J'adore
  *   5            -> 5  J'adore++
  *
  * SÉCURITÉS :
@@ -80,11 +87,92 @@ function lireNoteLetterboxdV1_(valeur) {
 function conversionNoteLetterboxdV1_(note) {
   const n = lireNoteLetterboxdV1_(note);
   if (!isFinite(n) || n <= 0 || n > 5) return null;
-  if (n <= 2) return 1;
-  if (n <= 3) return 2;
-  if (n <= 4) return 3;
+  if (n <= 1.5) return 1;
+  if (n <= 2.5) return 2;
+  if (n <= 3.5) return 3;
   if (n <= 4.5) return 4;
   return 5;
+}
+
+/**
+ * Lignes d'AVIS à reconvertir : pour chaque ligne importée avec succès
+ * (StatutImport = OK, CleImport = movie:ID), compare l'avis actuel dans AVIS
+ * à celui de la nouvelle répartition. Ne retient QUE les lignes d'AVIS dont
+ * Origine = "letterboxd" (un avis donné à la main n'est jamais touché).
+ */
+function calculerReconversionAvisLetterboxdV1_() {
+  const ctx = lireOngletImportLetterboxdV1_();
+  if (ctx.h.StatutImport === undefined || ctx.h.CleImport === undefined) {
+    throw new Error("Aucun import précédent dans " + IMPORT_LB_ONGLET_V1 + " (colonnes StatutImport/CleImport absentes).");
+  }
+  const feuilleAvis = getSheet_(IMPORT_LB_AVIS_ONGLET_V1);
+  if (!feuilleAvis || feuilleAvis.getLastRow() < 2) throw new Error("Onglet AVIS vide ou introuvable.");
+  const valAvis = feuilleAvis.getDataRange().getValues();
+  const hAvis = getHeadersMapV4_(valAvis[0]);
+  ["Cle", "Avis", "Origine"].forEach(function(c) {
+    if (hAvis[c] === undefined) throw new Error("Colonne manquante dans AVIS : " + c);
+  });
+  const ligneParCle = {};
+  for (let i = 1; i < valAvis.length; i++) {
+    const c = String(valAvis[i][hAvis.Cle] || "").trim();
+    if (c) ligneParCle[c] = i;
+  }
+  const changements = []; // { ligneFeuille, titre, de, vers, note }
+  const compte = { identiques: 0, mainOuAutre: 0, absentsAvis: 0, illisibles: 0 };
+  for (let i = 1; i < ctx.valeurs.length; i++) {
+    const l = ctx.valeurs[i];
+    if (String(l[ctx.h.StatutImport] || "").trim() !== "OK") continue;
+    const cle = String(l[ctx.h.CleImport] || "").trim();
+    const nouveau = conversionNoteLetterboxdV1_(l[ctx.h.Rating]);
+    if (!cle || !nouveau) { compte.illisibles++; continue; }
+    const ia = ligneParCle[cle];
+    if (ia === undefined) { compte.absentsAvis++; continue; }
+    if (String(valAvis[ia][hAvis.Origine] || "").trim().toLowerCase() !== "letterboxd") { compte.mainOuAutre++; continue; }
+    const ancien = Number(valAvis[ia][hAvis.Avis]);
+    if (ancien === nouveau) { compte.identiques++; continue; }
+    changements.push({
+      ligneFeuille: ia + 1, titre: nomFilmImportV1_(l[ctx.h.Name]),
+      note: lireNoteLetterboxdV1_(l[ctx.h.Rating]), de: ancien, vers: nouveau,
+    });
+  }
+  return { feuilleAvis: feuilleAvis, colAvis: hAvis.Avis + 1, changements: changements, compte: compte };
+}
+
+function resumerReconversionAvisLetterboxdV1_(r) {
+  const parTransition = {};
+  r.changements.forEach(function(c) { const k = c.de + " -> " + c.vers; parTransition[k] = (parTransition[k] || 0) + 1; });
+  Logger.log("Avis à changer : " + r.changements.length + " | déjà bons : " + r.compte.identiques +
+    " | donnés à la main (jamais touchés) : " + r.compte.mainOuAutre + " | absents d'AVIS : " + r.compte.absentsAvis +
+    " | lignes illisibles : " + r.compte.illisibles);
+  Object.keys(parTransition).sort().forEach(function(k) { Logger.log("  " + k + " : " + parTransition[k]); });
+}
+
+/** SIMULATION : ne modifie rien. Montre ce que la reconversion changerait. */
+function simulerReconversionAvisLetterboxdV1() {
+  const r = calculerReconversionAvisLetterboxdV1_();
+  Logger.log("=== SIMULATION reconversion des avis Letterboxd (rien n'est modifié) ===");
+  resumerReconversionAvisLetterboxdV1_(r);
+  r.changements.slice(0, 15).forEach(function(c) {
+    Logger.log("  " + c.titre + " (note " + c.note + ") : avis " + c.de + " -> " + c.vers);
+  });
+  if (r.changements.length > 15) Logger.log("  ... et " + (r.changements.length - 15) + " autre(s).");
+}
+
+/**
+ * RECONVERSION RÉELLE : écrit seulement la colonne Avis, ligne par ligne
+ * concernée. Relançable sans risque (une 2e fois : 0 changement).
+ * Avant : faire une copie de sauvegarde du Sheet.
+ */
+function reconvertirAvisLetterboxdV1() {
+  const r = calculerReconversionAvisLetterboxdV1_();
+  r.changements.forEach(function(c) {
+    r.feuilleAvis.getRange(c.ligneFeuille, r.colAvis).setValue(c.vers);
+  });
+  journal_("IMPORT_LETTERBOXD", "RECONVERSION", "OK",
+    r.changements.length + " avis mis à jour | déjà bons " + r.compte.identiques + " | à la main (intouchés) " + r.compte.mainOuAutre);
+  Logger.log("=== Reconversion des avis Letterboxd faite ===");
+  resumerReconversionAvisLetterboxdV1_(r);
+  Logger.log("TERMINÉ. Relancer ne changera plus rien.");
 }
 
 function dateImportLetterboxdV1_(valeur) {
