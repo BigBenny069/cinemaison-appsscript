@@ -18,7 +18,8 @@
              - primeNettoyageApercu / primeNettoyageAppliquer : liste, puis
                efface, les dates de fin automatiques périmées des fiches
                Prime en Abonnement complémentaire / VOD.
- * Version : 1.1 (11/10/2026)
+ * Version : 1.2 (27/10/2026) -- ajout executerCanalRecontrolerBloques403V1 (voir 06 V4.9.1)
+ * (1.1 : 11/10/2026)
  *
  * Le webhook doit répondre vite (Vercel coupe les appels longs) : les deux
  * actions longues programment donc un déclencheur UNIQUE dans ~1 seconde
@@ -109,6 +110,19 @@ function executerCanalRecontrolerAVerifierV1() {
   } catch (err) {
     journal_("CANAL_APP", "RECONTROLE_A_VERIFIER", "ERREUR", String(err));
     envoyerMailTexteCanalAppV1_("CinéMaison - V2 - CANAL+ : recontrôle en erreur", "Le recontrôle des fiches à vérifier a échoué : " + String(err));
+  }
+}
+
+/** V4.9.1 -- Déclencheur unique (1 h après un parcours) : recontrôle les fiches bloquées en 403. */
+function executerCanalRecontrolerBloques403V1() {
+  supprimerDeclencheurCanalV4_("executerCanalRecontrolerBloques403V1");
+  try {
+    const resultats = recontrolerFichesCanalAVerifierV1();
+    envoyerMailRecontroleCanalAppV1_(resultats);
+    journal_("CANAL_APP", "RECONTROLE_BLOQUES_403", "OK", "Fiches recontrôlées=" + resultats.length);
+  } catch (err) {
+    journal_("CANAL_APP", "RECONTROLE_BLOQUES_403", "ERREUR", String(err));
+    envoyerMailTexteCanalAppV1_("CinéMaison - V2 - CANAL+ : recontrôle des fiches bloquées en erreur", String(err));
   }
 }
 

@@ -3,10 +3,23 @@
  * CinéMaison V4
  * Script : 06_CONNECTEURS_PLATEFORMES.gs
  * Rôle   : Connecteurs plateformes — CANAL+ uniquement
- * Version: 4.9.0
+ * Version: 4.9.1
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs,
  *               Worker Cloudflare CANAL+ V3.7
  * ============================================================
+ *
+ * V4.9.1 (27/10/2026) -- Correctif : Canal+ répond « 403 » (accès refusé) quand
+ * le contrôle l'interroge trop vite -- constaté le soir de 3 contrôles
+ * successifs (16 fiches en 403, pourtant normales dans un navigateur).
+ *  - pause de 1,5 s entre deux fiches (avant : 0,5 s) ;
+ *  - un 403/429 n'est réessayé qu'UNE fois, après 8 s (avant : 3 essais
+ *    d'affilée, ce qui aggravait le blocage) ;
+ *  - une fiche qui avait déjà une date et qui tombe en 403 N'EST PLUS passée
+ *    « à vérifier » : statut et date précédents conservés, commentaire
+ *    « CANAL+ BLOQUÉ (403) », comptée à part dans le bilan ;
+ *  - 1 h après la fin du parcours, ces fiches sont recontrôlées toutes seules
+ *    (un mail de résultat est envoyé) ; « recontrôler les à vérifier » les
+ *    reprend aussi.
  *
  * V4.9.0 (27/10/2026) -- Correctif : les changements de STATUT d'accès Canal+
  * ne s'écrivent plus tout seuls, ils sont PROPOSÉS (onglet CANAL_PROPOSITIONS)
@@ -321,6 +334,7 @@ function demarrerControleCompletCanalV4() {
     aVerifier: 0,
     nonTrouves: 0,
     vodSansDate: 0,
+    bloques403: 0,
     erreurs: 0,
     changements: 0,
     modifications: []
@@ -431,6 +445,8 @@ function continuerControleCompletCanalV4() {
       Number(etat.nonTrouves || 0) + (resultat.stats.nonTrouves || 0);
     etat.vodSansDate =
       Number(etat.vodSansDate || 0) + (resultat.stats.vodSansDate || 0);
+    etat.bloques403 =
+      Number(etat.bloques403 || 0) + (resultat.stats.bloques403 || 0);
     etat.erreurs =
       Number(etat.erreurs || 0) + resultat.stats.erreurs;
     etat.changements =
@@ -661,6 +677,16 @@ function terminerControleCompletCanalV4_(etat) {
   const contextePourBilan = initialiserContexteCanalV41_();
   if (contextePourBilan) {
     envoyerMailBilanFinParcoursCanalV4_(etat, contextePourBilan.sheet, contextePourBilan.h);
+  }
+
+  // V4.9.1 : fiches bloquées en 403 -> recontrôle automatique dans 1 h.
+  if (Number(etat.bloques403 || 0) > 0) {
+    try {
+      supprimerDeclencheurCanalV4_("executerCanalRecontrolerBloques403V1");
+      ScriptApp.newTrigger("executerCanalRecontrolerBloques403V1").timeBased().after(60 * 60 * 1000).create();
+    } catch (errBloq) {
+      erreur_("CONNECTEURS", "CANAL_BLOQUES_403", "Programmation du recontrôle", String(errBloq));
+    }
   }
 
   // V4.9.0 : mail des changements de statut proposés (cases à choisir).
@@ -944,6 +970,8 @@ function traiterIndicesCanalV41_(sheet, data, h, indices, mode) {
         stats.aVerifier++;
       } else if (result.statut === "VOD_SANS_DATE") {
         stats.vodSansDate++;
+      } else if (result.statut === "BLOQUE_403") {
+        stats.bloques403++;
       } else if (result.statut === "NON_TROUVE_CANAL") {
         // Correctif V4.7.4 : compté séparément, jamais dans stats.erreurs
         // -- voir appliquerNonTrouveCanalV4_.
@@ -968,7 +996,7 @@ function traiterIndicesCanalV41_(sheet, data, h, indices, mode) {
       }
 
 
-      Utilities.sleep(500);
+      Utilities.sleep(1500);
 
 
     } catch (e) {
@@ -1079,6 +1107,7 @@ function creerStatsCanalV41_() {
     aVerifier: 0,
     nonTrouves: 0,
     vodSansDate: 0,
+    bloques403: 0,
     erreurs: 0,
     changements: 0
   };
@@ -1433,6 +1462,28 @@ function controleCanalLigneV4_(sheet, rowNumber, row, h) {
   }
 
 
+  // V4.9.1 : 403/429 sur une fiche qui avait déjà une bonne date -> on ne la
+  // passe PAS « à vérifier » : statut et date précédents conservés.
+  const ancienStatutBonCanal =
+    ["DATE_CONNUE", "PLUS_DE_6_MOIS", "VOD_SANS_DATE"].indexOf(String(ancienStatutAuto || "").trim()) !== -1;
+  if (!nouvelleDate && ancienStatutBonCanal && estBlocageCanalV1_(String(commentaireApi || "") + " " + String(texteOriginal || ""))) {
+    setProtected_(
+      sheet,
+      rowNumber,
+      h,
+      "CommentaireDisponibilite",
+      CANAL_MARQUEUR_403_V1 + " : Canal+ a refusé la requête, date précédente conservée, nouveau contrôle automatique plus tard",
+      { force: true }
+    );
+
+    Logger.log("BLOQUE_403 | ligne " + rowNumber + " | " + titre + " | statut précédent conservé : " + ancienStatutAuto);
+
+    return {
+      statut: "BLOQUE_403",
+      changement: false
+    };
+  }
+
   setProtected_(
     sheet,
     rowNumber,
@@ -1485,6 +1536,13 @@ function controleCanalLigneV4_(sheet, rowNumber, row, h) {
  * APPEL WORKER CANAL+
  * ============================================================
  */
+// V4.9.1 -- marqueur écrit dans CommentaireDisponibilite d'une fiche bloquée en 403.
+const CANAL_MARQUEUR_403_V1 = "CANAL+ BLOQUÉ (403)";
+
+function estBlocageCanalV1_(texte) {
+  return /HTTP[^0-9]{0,20}(403|429)/i.test(String(texte || ""));
+}
+
 /**
  * V4.8.4 -- appelle canalEnrichCloudflareV4_ jusqu'à 3 fois. Réessaie si :
  *  - panne technique (réponse absente, non ok, hors NO_MATCH) ;
@@ -1509,6 +1567,8 @@ function canalEnrichAvecReessaiV1_(titre, annee, canalContentId) {
       const res = api.result;
       const texte = String(res.commentaireDisponibilite || "") + " " + String(res.texteDisponibiliteOriginal || "");
       aReessayer = !res.dateDisponibilite && /HTTP/i.test(texte);
+      // V4.9.1 : un 403/429 (Canal+ nous freine) n'est réessayé qu'une fois.
+      if (aReessayer && essai >= 2 && estBlocageCanalV1_(texte)) aReessayer = false;
     }
 
     if (!aReessayer || essai === ESSAIS) {
@@ -1517,7 +1577,11 @@ function canalEnrichAvecReessaiV1_(titre, annee, canalContentId) {
       }
       return api;
     }
-    Utilities.sleep(3000 * essai);
+    // V4.9.1 : après un 403/429, on attend plus longtemps avant l'unique réessai.
+    const dernierTexte = api && api.result
+      ? String(api.result.commentaireDisponibilite || "") + " " + String(api.result.texteDisponibiliteOriginal || "")
+      : "";
+    Utilities.sleep(estBlocageCanalV1_(dernierTexte) ? 8000 : 3000 * essai);
   }
   return api;
 }
@@ -1535,9 +1599,12 @@ function recontrolerFichesCanalAVerifierV1() {
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     if (normalizePlatform_(get_(row, h, "Plateforme")) !== "CANAL+") continue;
-    if (String(get_(row, h, "StatutDisponibiliteAuto") || "").trim() !== "A_VERIFIER_CANAL") continue;
+    const estAVerifier = String(get_(row, h, "StatutDisponibiliteAuto") || "").trim() === "A_VERIFIER_CANAL";
+    const estBloquee = String(get_(row, h, "CommentaireDisponibilite") || "").indexOf(CANAL_MARQUEUR_403_V1) === 0;
+    if (!estAVerifier && !estBloquee) continue;
     controleCanalLigneV4_(sheet, i + 1, row, h);
     lignes.push(i + 1);
+    Utilities.sleep(1500);
   }
   // Relit les lignes après contrôle pour rapporter l'état réel.
   const resultats = lignes.map(function (numero) {
@@ -1913,6 +1980,8 @@ function envoyerMailBilanFinParcoursCanalV4_(etat, sheet, h) {
     "  Dates connues trouvées : " + (etat.datesConnues || 0) + "\n" +
     "  Plus de 6 mois : " + (etat.plusDe6Mois || 0) + "\n" +
     "  VOD sans date de fin (normal) : " + (etat.vodSansDate || 0) + "\n" +
+    "  Bloquées par Canal+ (403), date précédente conservée : " + (etat.bloques403 || 0) +
+    (etat.bloques403 > 0 ? " (recontrôle automatique dans 1 h)" : "") + "\n" +
     "  Changements de date réels : " + (etat.changements || 0) +
     (etat.changements > 0 ? " (voir le mail \"Modifications CANAL+\" séparé)" : "") + "\n" +
     "  Erreurs techniques : " + (etat.erreurs || 0) + "\n\n" +
