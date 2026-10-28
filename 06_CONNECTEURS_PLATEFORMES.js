@@ -3,10 +3,13 @@
  * CinéMaison V4
  * Script : 06_CONNECTEURS_PLATEFORMES.gs
  * Rôle   : Connecteurs plateformes — CANAL+ uniquement
- * Version: 4.9.2
+ * Version: 4.9.3
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs,
  *               Worker Cloudflare CANAL+ V3.7
  * ============================================================
+ *
+ * V4.9.3 (28/10/2026) -- le mail des propositions de statut est réessayé (3 essais) en cas de
+ * délai Google dépassé, et l'erreur active est fermée dès qu'il passe (cas réel du 27/10).
  *
  * V4.9.2 (28/10/2026) -- le mail "Modifications CANAL+" cherchait l'identifiant de la fiche dans
  * une colonne "FilmID" qui n'existe pas (la colonne s'appelle "ID") : il restait vide.
@@ -694,7 +697,7 @@ function terminerControleCompletCanalV4_(etat) {
 
   // V4.9.0 : mail des changements de statut proposés (cases à choisir).
   try {
-    envoyerMailPropositionsCanalV1_(false);
+    envoyerMailPropositionsCanalAvecReessaiV1_(false);
   } catch (errProp) {
     erreur_("CONNECTEURS", "CANAL_PROPOSITIONS", "Mail des propositions de statut", String(errProp));
   }
