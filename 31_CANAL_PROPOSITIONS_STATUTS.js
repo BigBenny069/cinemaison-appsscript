@@ -1,7 +1,8 @@
 /**
  * ============================================================
  * 31_CANAL_PROPOSITIONS_STATUTS.js
- * Version: 1.1 (28/10/2026) -- l'en-tête est reposé si la cellule A1 est vide
+ * Version: 1.2 (28/10/2026) -- envoi du mail avec réessais (délais Google transitoires),
+ * erreur active fermée dès que ça passe. 1.1 (28/10/2026) : l'en-tête est reposé si la cellule A1 est vide
  * (1.0 : 27/10/2026)
  *
  * But : pour CANAL+, les changements de STATUT d'accès (colonne
@@ -321,8 +322,19 @@ function traiterCanalPropositionsAppliquerV1_(corps) {
   }
 }
 
+/**
+ * Envoie le mail avec jusqu'à 3 essais si Google répond par un délai dépassé
+ * (cas réel du 27/10/2026 : "Expiration du délai de connexion au service
+ * Feuilles de calcul"). Si ça passe, l'erreur active éventuelle est fermée.
+ */
+function envoyerMailPropositionsCanalAvecReessaiV1_(force) {
+  const r = avecReessaiSheets_(function () { return envoyerMailPropositionsCanalV1_(force); }, 3);
+  resoudreErreur_("CONNECTEURS", "CANAL_PROPOSITIONS");
+  return r;
+}
+
 /** À lancer à la main pour renvoyer le mail tout de suite. */
 function renvoyerMailPropositionsCanalV1() {
-  const r = envoyerMailPropositionsCanalV1_(true);
+  const r = envoyerMailPropositionsCanalAvecReessaiV1_(true);
   Logger.log("Propositions Canal+ : " + JSON.stringify(r));
 }

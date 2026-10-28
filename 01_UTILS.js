@@ -136,7 +136,12 @@ function avecReessaiSheets_(fonction, tentatives) {
       const estTransitoire =
         message.indexOf("timed out") !== -1 ||
         message.indexOf("timeout") !== -1 ||
-        message.indexOf("service spreadsheets") !== -1;
+        message.indexOf("service spreadsheets") !== -1 ||
+        // Correctif 28/10/2026 : Google renvoie ces messages EN FRANÇAIS sur ce
+        // compte ("Expiration du délai de connexion au service Feuilles de
+        // calcul...") -- ils n'étaient pas reconnus, donc jamais réessayés.
+        message.indexOf("expiration du délai") !== -1 ||
+        message.indexOf("service feuilles de calcul") !== -1;
 
       if (!estTransitoire || essai === tentatives) {
         throw e;
