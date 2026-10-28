@@ -3,10 +3,13 @@
  * CinéMaison V4
  * Script : 06_CONNECTEURS_PLATEFORMES.gs
  * Rôle   : Connecteurs plateformes — CANAL+ uniquement
- * Version: 4.9.1
+ * Version: 4.9.2
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs,
  *               Worker Cloudflare CANAL+ V3.7
  * ============================================================
+ *
+ * V4.9.2 (28/10/2026) -- le mail "Modifications CANAL+" cherchait l'identifiant de la fiche dans
+ * une colonne "FilmID" qui n'existe pas (la colonne s'appelle "ID") : il restait vide.
  *
  * V4.9.1 (27/10/2026) -- Correctif : Canal+ répond « 403 » (accès refusé) quand
  * le contrôle l'interroge trop vite -- constaté le soir de 3 contrôles
@@ -1339,7 +1342,7 @@ function controleCanalLigneV4_(sheet, rowNumber, row, h) {
         typeModification: "DATE_AO",
         dateModifiee: changementDate,
         ligne: rowNumber,
-        filmId: get_(row, h, "FilmID") || "",
+        filmId: get_(row, h, "ID") || "",
         titre: titre,
         annee: annee || "",
         affiche: get_(row, h, "Affiche") || "",

@@ -1,7 +1,8 @@
 /**
  * ============================================================
  * 31_CANAL_PROPOSITIONS_STATUTS.js
- * Version: 1.0 (27/10/2026)
+ * Version: 1.1 (28/10/2026) -- l'en-tête est reposé si la cellule A1 est vide
+ * (1.0 : 27/10/2026)
  *
  * But : pour CANAL+, les changements de STATUT d'accès (colonne
  * StatutAcces : Inclus / VOD / Indispo ...) ne s'écrivent plus tout seuls.
@@ -47,6 +48,12 @@ function canalPropFeuilleV1_() {
   let feuille = classeur.getSheetByName(CANAL_PROP_FEUILLE_V1);
   if (!feuille) {
     feuille = classeur.insertSheet(CANAL_PROP_FEUILLE_V1);
+  }
+  // Correctif V1.1 (28/10/2026) : l'onglet existait mais SANS en-tête (constaté
+  // sur le Sheet réel) -- la 1re proposition aurait alors été écrite en ligne 1
+  // et ignorée à la lecture (qui saute la ligne 1). On (re)pose l'en-tête dès que
+  // la cellule A1 est vide, que l'onglet soit neuf ou déjà là.
+  if (String(feuille.getRange(1, 1).getValue() || "").trim() === "") {
     feuille.getRange(1, 1, 1, CANAL_PROP_ENTETE_V1.length)
       .setValues([CANAL_PROP_ENTETE_V1]).setFontWeight("bold");
     feuille.setFrozenRows(1);
