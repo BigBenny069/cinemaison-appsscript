@@ -6,7 +6,8 @@
  *          (source JustWatch) qui ressemblent à ce qui est déjà dans
  *          CinéMaison. Écrit l'onglet SUGGESTIONS (lu par l'app) et
  *          envoie un mail récapitulatif.
- * Version: 2.3 (19/10/2026)
+ * Version: 2.4 (29/10/2026)
+ *   V2.4 : correctif 29/10/2026 -- colonne « Vu » retirée du Sheet (plus de poids double pour une fiche « vue »).
  *   V2.3 : avis de Ben sur ses films (onglet AVIS, 5 niveaux : J'aime pas, Neutre,
  *          J'aime bien, J'adore, J'adore++) pris en compte dans le calcul des goûts.
  *   V2.2 : (1) note TMDb ignorée si moins de 50 votes (séries toutes neuves à 9.8/10) ;
@@ -390,9 +391,9 @@ function suggestionsConstruireProfilV1_() {
     connus.titres[suggestionsNormaliserTitreV1_(titre) + ":" + annee] = true;
     if (original) connus.titres[suggestionsNormaliserTitreV1_(original) + ":" + annee] = true;
 
-    // Une fiche déjà vue compte double : tu as vraiment regardé.
-    const vu = String(get_(ligne, h, "Vu") || "").trim();
-    const p = vu && vu.toUpperCase() !== "NON" && vu.toUpperCase() !== "FALSE" ? 2 : 1;
+    // Correctif 29/10/2026 : la colonne « Vu » est retirée du Sheet (jamais
+    // utilisée) ; toutes les fiches comptent pareil.
+    const p = 1;
 
     suggestionsDecouperGenresV1_(get_(ligne, h, "Genre")).forEach(function(g) {
       poids[g] = (poids[g] || 0) + p;
