@@ -13,7 +13,23 @@
  *             DERNIERES_SUGGESTIONS_PLATEFORMES (voir 09_WEBHOOK.gs),
  *             donc toujours la donnée du dernier scan de chaque
  *             plateforme, même si le scan remonte à plusieurs jours.
- * Version : 1.9
+ * Version : 2.0
+ *
+ * Correctif V2.0 (29/10/2026) : fausse alerte « 11 à retirer » (Prime, 29/10). Deux
+ * causes corrigées : (1) la confirmation « absente de 2 scans » comptait deux
+ * JOURS de rapport, pas deux contrôles : sans nouveau contrôle entre-temps, le
+ * même contrôle était relu deux fois et pris pour une confirmation. Désormais
+ * une fiche sans date de départ connue n'est signalée que si elle manque dans
+ * DEUX CONTRÔLES DIFFÉRENTS (horodatage ControleLe), premier constat un autre
+ * jour. (2) un contrôle incomplet (ex. 261 fiches vues au lieu de 274, 0 erreur)
+ * faisait tout signaler : un contrôle qui voit au moins 5 fiches (et 2 %) de
+ * moins que le dernier contrôle de référence est jugé « suspect » : aucun
+ * retrait sans date n'est alors proposé ni confirmé, et le mail prévient
+ * (une seule fois par contrôle suspect) de relancer le contrôle. Si le contrôle
+ * suivant revient au même niveau (±2), c'est une vraie baisse : il devient la
+ * référence. Nouvel onglet ECARTS_SCANS_REFERENCE ; ECARTS_RETRAIT_EN_ATTENTE
+ * gagne une 4e colonne (ScanDuPremierConstat). Les anciennes lignes sans cette
+ * colonne repartent d'un premier constat au prochain rapport.
  *
  * Correctif V1.9 (18/10/2026) : plateforme PARAMOUNT ajoutée au rapport
  * (RAPPORT_ECARTS_PLATEFORMES_V1).
@@ -190,6 +206,150 @@ function chargerTitresIgnoresV1_(plateforme) {
   return ignores;
 }
 
+/**
+ * NOUVEAU (29/10/2026) -- logique PURE (sans Sheet) du contrôle « scan suspect »
+ * et de la confirmation sur deux contrôles différents. Séparées pour être
+ * testables hors Apps Script.
+ */
+const RAPPORT_SCAN_BAISSE_MIN_V1 = 5;      // au moins 5 fiches de moins que la référence...
+const RAPPORT_SCAN_BAISSE_POURCENT_V1 = 0.02; // ...et au moins 2 %
+const RAPPORT_SCAN_TOLERANCE_STABLE_V1 = 2;  // baisse « stable » = même niveau à ±2
+
+/**
+ * ref = { scanLe, nb, suspectLe, nbSuspect, alerteLe } (ou null si jamais vu).
+ * Retourne { suspect, ref, nbRef } : ref est la ligne à mémoriser.
+ */
+function evaluerScanReferenceV1_(ref, scanLe, nb, nbAttendu) {
+  if (!scanLe) return { suspect: false, ref: ref, nbRef: ref ? ref.nb : nb };
+  if (!ref) {
+    // Première évaluation de cette plateforme : pas de contrôle de référence.
+    // On se base sur le nombre de fiches DÉJÀ VUES au moins une fois dans un
+    // contrôle (nbAttendu, optionnel) : si ce contrôle en voit nettement moins,
+    // il est suspect dès le départ (cas du 29/10/2026 : 261 vues, 272 attendues).
+    const seuilInitial = nbAttendu ? Math.max(RAPPORT_SCAN_BAISSE_MIN_V1, Math.ceil(nbAttendu * RAPPORT_SCAN_BAISSE_POURCENT_V1)) : 0;
+    if (nbAttendu && nbAttendu - nb >= seuilInitial) {
+      return {
+        suspect: true,
+        ref: { scanLe: "", nb: nbAttendu, suspectLe: scanLe, nbSuspect: nb, alerteLe: "" },
+        nbRef: nbAttendu,
+      };
+    }
+    return { suspect: false, ref: { scanLe: scanLe, nb: nb, suspectLe: "", nbSuspect: "", alerteLe: "" }, nbRef: nb };
+  }
+  // Même contrôle que celui déjà évalué : même verdict qu'avant.
+  if (ref.scanLe === scanLe) return { suspect: false, ref: ref, nbRef: ref.nb };
+  if (ref.suspectLe === scanLe) return { suspect: true, ref: ref, nbRef: ref.nb };
+
+  const baisse = ref.nb - nb;
+  const seuil = Math.max(RAPPORT_SCAN_BAISSE_MIN_V1, Math.ceil(ref.nb * RAPPORT_SCAN_BAISSE_POURCENT_V1));
+  if (baisse < seuil) {
+    return { suspect: false, ref: { scanLe: scanLe, nb: nb, suspectLe: "", nbSuspect: "", alerteLe: "" }, nbRef: ref.nb };
+  }
+  // Grosse baisse. Si un contrôle suspect précédent (autre horodatage) était au
+  // même niveau, la baisse est probablement réelle : on l'accepte comme référence.
+  if (ref.nbSuspect !== "" && ref.nbSuspect !== null && ref.suspectLe && ref.suspectLe !== scanLe &&
+      Math.abs(Number(ref.nbSuspect) - nb) <= RAPPORT_SCAN_TOLERANCE_STABLE_V1) {
+    return { suspect: false, ref: { scanLe: scanLe, nb: nb, suspectLe: "", nbSuspect: "", alerteLe: "" }, nbRef: ref.nb };
+  }
+  return {
+    suspect: true,
+    ref: { scanLe: ref.scanLe, nb: ref.nb, suspectLe: scanLe, nbSuspect: nb, alerteLe: ref.alerteLe || "" },
+    nbRef: ref.nb,
+  };
+}
+
+/**
+ * entree = { date, scan } du premier constat (ou null). Retourne
+ * { confirme, entree } ; entree = ligne à mémoriser (null = ne rien mémoriser).
+ * Une fiche n'est confirmée que si : premier constat un AUTRE jour ET dans un
+ * AUTRE contrôle. Contrôle suspect : rien de nouveau n'est mémorisé ni confirmé.
+ */
+function decisionRetraitSansDateV1_(entree, scanLe, aujourdHui, scanSuspect) {
+  if (scanSuspect) return { confirme: false, entree: entree || null };
+  if (!entree || !entree.date) return { confirme: false, entree: { date: aujourdHui, scan: scanLe || "" } };
+  // Ancienne ligne (sans contrôle mémorisé) : repart d'un premier constat.
+  if (scanLe && !entree.scan) return { confirme: false, entree: { date: aujourdHui, scan: scanLe } };
+  const autreJour = entree.date !== aujourdHui;
+  const autreControle = scanLe ? entree.scan !== scanLe : true; // horodatage illisible : repli sur le jour seul
+  if (autreJour && autreControle) return { confirme: true, entree: entree };
+  return { confirme: false, entree: entree };
+}
+
+function horodatageControleV1_(resultats) {
+  const hR = resultats.index;
+  let max = null;
+  for (let i = 1; i < resultats.lignes.length; i++) {
+    const brut = resultats.lignes[i][hR.ControleLe];
+    const d = convertirDateControleStreamingV1_(brut);
+    if (d && !isNaN(d.getTime()) && (!max || d.getTime() > max.getTime())) max = d;
+  }
+  return max ? Utilities.formatDate(max, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss") : "";
+}
+
+/**
+ * Jour (yyyy-MM-dd) d'une cellule du Sheet, qu'elle soit une vraie date, un
+ * texte « yyyy-MM-dd » ou un ancien texte « Wed Oct 28 2026 00:00:00 GMT+0100 ».
+ * L'ancien code comparait ce texte brut à « yyyy-MM-dd » : jamais égal, donc
+ * toujours « un autre jour » (deuxième cause de la fausse alerte du 29/10/2026).
+ */
+function jourDeCelluleV1_(valeur) {
+  if (!valeur) return "";
+  const fuseau = Session.getScriptTimeZone();
+  if (Object.prototype.toString.call(valeur) === "[object Date]") {
+    return isNaN(valeur.getTime()) ? "" : Utilities.formatDate(valeur, fuseau, "yyyy-MM-dd");
+  }
+  const texte = String(valeur).trim();
+  const iso = texte.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (iso) return iso[1];
+  const d = new Date(texte);
+  return isNaN(d.getTime()) ? "" : Utilities.formatDate(d, fuseau, "yyyy-MM-dd");
+}
+
+const RAPPORT_ECARTS_REFERENCE_FEUILLE_V1 = "ECARTS_SCANS_REFERENCE";
+const RAPPORT_ECARTS_REFERENCE_ENTETE_V1 = ["Plateforme", "ScanLe", "NbFiches", "ScanSuspectLe", "NbSuspect", "AlerteEnvoyeeLe"];
+
+function lireReferenceScanV1_(plateforme) {
+  const feuille = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(RAPPORT_ECARTS_REFERENCE_FEUILLE_V1);
+  if (!feuille || feuille.getLastRow() < 2) return null;
+  const lignes = feuille.getRange(2, 1, feuille.getLastRow() - 1, 6).getValues();
+  for (let i = 0; i < lignes.length; i++) {
+    if (String(lignes[i][0] || "").trim() === plateforme) {
+      return {
+        scanLe: String(lignes[i][1] || ""), nb: Number(lignes[i][2]) || 0,
+        suspectLe: String(lignes[i][3] || ""), nbSuspect: lignes[i][4] === "" ? "" : Number(lignes[i][4]),
+        alerteLe: String(lignes[i][5] || ""),
+      };
+    }
+  }
+  return null;
+}
+
+function ecrireReferenceScanV1_(plateforme, ref) {
+  const classeur = SpreadsheetApp.getActiveSpreadsheet();
+  let feuille = classeur.getSheetByName(RAPPORT_ECARTS_REFERENCE_FEUILLE_V1);
+  if (!feuille) {
+    feuille = classeur.insertSheet(RAPPORT_ECARTS_REFERENCE_FEUILLE_V1);
+  }
+  if (!String(feuille.getRange(1, 1).getValue() || "").trim()) {
+    feuille.getRange(1, 1, 1, RAPPORT_ECARTS_REFERENCE_ENTETE_V1.length).setValues([RAPPORT_ECARTS_REFERENCE_ENTETE_V1]).setFontWeight("bold");
+  }
+  // Les horodatages sont mémorisés en TEXTE (format « @ » posé AVANT l'écriture) :
+  // sinon Google Sheets les convertit en dates et la comparaison ne colle plus.
+  feuille.getRange(1, 1, Math.max(feuille.getMaxRows(), 2), 6).setNumberFormat("@");
+  const ligne = [plateforme, ref.scanLe, ref.nb, ref.suspectLe || "", ref.nbSuspect, ref.alerteLe || ""];
+  const derniere = feuille.getLastRow();
+  if (derniere >= 2) {
+    const noms = feuille.getRange(2, 1, derniere - 1, 1).getValues();
+    for (let i = 0; i < noms.length; i++) {
+      if (String(noms[i][0] || "").trim() === plateforme) {
+        feuille.getRange(i + 2, 1, 1, 6).setValues([ligne]);
+        return;
+      }
+    }
+  }
+  feuille.getRange(derniere + 1, 1, 1, 6).setValues([ligne]);
+}
+
 function genererEtEnvoyerRapportEcartsV1() {
   const parPlateforme = RAPPORT_ECARTS_PLATEFORMES_V1.map(function (plateforme) {
     const ignores = chargerTitresIgnoresV1_(plateforme);
@@ -198,9 +358,11 @@ function genererEtEnvoyerRapportEcartsV1() {
         return !ignores.has(normaliserTitreIgnoresV1_(f.titre) + "|" + type);
       });
     };
+    const ecarts = calculerEcartsRetraitDetailV1_(plateforme);
     return {
       plateforme: plateforme,
-      manquants: calculerEcartsRetraitV1_(plateforme),
+      scanSuspect: ecarts.scanSuspect,
+      manquants: ecarts.manquants,
       suggestions: filtrerIgnores(lireDernieresSuggestionsV1_(plateforme, "SUGGESTION"), "SUGGESTION"),
       ambiguites: filtrerIgnores(lireDernieresSuggestionsV1_(plateforme, "AMBIGUITE"), "AMBIGUITE"),
     };
@@ -210,8 +372,19 @@ function genererEtEnvoyerRapportEcartsV1() {
   const totalSuggestions = parPlateforme.reduce(function (s, p) { return s + p.suggestions.length; }, 0);
   const totalAmbiguites = parPlateforme.reduce(function (s, p) { return s + p.ambiguites.length; }, 0);
 
-  if (totalManquants + totalSuggestions + totalAmbiguites === 0) {
-    journal_("RAPPORT_ECARTS", "QUOTIDIEN", "OK", "Rien à signaler sur les 3 plateformes.");
+  // NOUVEAU (29/10/2026) -- contrôle suspect (nettement moins de fiches vues
+  // que la référence) : à signaler UNE fois par contrôle suspect, même s'il n'y
+  // a rien d'autre dans le rapport ; ensuite le bandeau n'apparaît que si le
+  // mail part de toute façon.
+  const suspects = parPlateforme.filter(function (p) { return p.scanSuspect; });
+  const suspectsNouveaux = suspects.filter(function (p) { return p.scanSuspect.aAlerter; });
+  const resumeSuspects = suspects.map(function (p) {
+    return p.plateforme + " " + p.scanSuspect.nb + " fiches vues au lieu de " + p.scanSuspect.nbRef;
+  }).join("; ");
+
+  if (totalManquants + totalSuggestions + totalAmbiguites === 0 && suspectsNouveaux.length === 0) {
+    journal_("RAPPORT_ECARTS", "QUOTIDIEN", "OK",
+      "Rien à signaler sur les 3 plateformes." + (suspects.length ? " Contrôle suspect déjà signalé : " + resumeSuspects : ""));
     return;
   }
 
@@ -221,14 +394,24 @@ function genererEtEnvoyerRapportEcartsV1() {
     MailApp.sendEmail({
       to: destinataires,
       subject: "CinéMaison - V2 - Écarts plateformes (" + totalManquants + " à retirer, " +
-        totalSuggestions + " à ajouter, " + totalAmbiguites + " ambiguïté(s))",
+        totalSuggestions + " à ajouter, " + totalAmbiguites + " ambiguïté(s))" +
+        (suspects.length ? " - contrôle " + suspects.map(function (p) { return p.plateforme; }).join("/") + " incomplet ?" : ""),
       htmlBody: html,
+    });
+    // Alerte « contrôle suspect » mémorisée : pas de nouveau mail pour ce seul motif.
+    suspectsNouveaux.forEach(function (p) {
+      const ref = lireReferenceScanV1_(p.plateforme);
+      if (ref) {
+        ref.alerteLe = p.scanSuspect.scanLe;
+        ecrireReferenceScanV1_(p.plateforme, ref);
+      }
     });
   }
 
   journal_(
     "RAPPORT_ECARTS", "QUOTIDIEN", destinataires ? "OK" : "IGNORE_SANS_DESTINATAIRE",
-    "Manquants=" + totalManquants + " | Suggestions=" + totalSuggestions + " | Ambiguïtés=" + totalAmbiguites
+    "Manquants=" + totalManquants + " | Suggestions=" + totalSuggestions + " | Ambiguïtés=" + totalAmbiguites +
+    (suspects.length ? " | Contrôle suspect : " + resumeSuspects : "")
   );
 }
 
@@ -240,13 +423,23 @@ function genererEtEnvoyerRapportEcartsV1() {
  * collecteur n'a jamais tourné).
  */
 function calculerEcartsRetraitV1_(plateforme) {
+  return calculerEcartsRetraitDetailV1_(plateforme).manquants;
+}
+
+/**
+ * Comme calculerEcartsRetraitV1_ mais renvoie aussi { scanSuspect } :
+ * null si le dernier contrôle est normal, sinon
+ * { nb, nbRef, scanLe, aAlerter } (voir evaluerScanReferenceV1_).
+ */
+function calculerEcartsRetraitDetailV1_(plateforme) {
+  const VIDE = { manquants: [], scanSuspect: null };
   const classeur = SpreadsheetApp.getActiveSpreadsheet();
   const films = classeur.getSheetByName("Films");
-  if (!films) return [];
+  if (!films) return VIDE;
 
   const donneesFilms = films.getDataRange().getValues();
   const hFilms = indexEntetesStreamingV1_(donneesFilms[0]);
-  if (hFilms.ID === undefined || hFilms.Titre === undefined || hFilms.Plateforme === undefined) return [];
+  if (hFilms.ID === undefined || hFilms.Titre === undefined || hFilms.Plateforme === undefined) return VIDE;
 
   let feuilleControle, estDeCettePlateforme;
   if (plateforme === "PRIME") {
@@ -259,7 +452,7 @@ function calculerEcartsRetraitV1_(plateforme) {
   }
 
   const controle = classeur.getSheetByName(feuilleControle);
-  if (!controle) return [];
+  if (!controle) return VIDE;
 
   // Ne doit JAMAIS faire planter tout le rapport pour les autres
   // plateformes -- lireResultatsStreamingV1_/lireResultatsPrimeV110_
@@ -276,9 +469,9 @@ function calculerEcartsRetraitV1_(plateforme) {
       "RAPPORT_ECARTS : " + feuilleControle + " ignorée (données mal formées, probablement un résidu d'un " +
       "ancien format) -- " + e.message
     );
-    return [];
+    return VIDE;
   }
-  if (!resultats) return []; // pas de scan complet enregistré -- rien à comparer
+  if (!resultats) return VIDE; // pas de scan complet enregistré -- rien à comparer
 
   // CORRECTIF (24/09/2026) -- un scan RÉUSSI mais dont l'écriture vers
   // le Sheet a échoué EN COURS DE ROUTE (le Vercel de controle-prime.js
@@ -298,7 +491,7 @@ function calculerEcartsRetraitV1_(plateforme) {
       "RAPPORT_ECARTS : " + feuilleControle + " a un entête mais aucune ligne de données -- " +
       "traité comme \"pas de scan\" plutôt que \"tout a disparu\"."
     );
-    return [];
+    return VIDE;
   }
 
   const idsScannes = {};
@@ -306,6 +499,33 @@ function calculerEcartsRetraitV1_(plateforme) {
   for (let i = 1; i < resultats.lignes.length; i++) {
     const id = String(resultats.lignes[i][hR.IDFilm] || "").trim();
     if (id) idsScannes[id] = true;
+  }
+
+  // NOUVEAU (29/10/2026) -- horodatage du contrôle et verdict « suspect ? »
+  // (voir evaluerScanReferenceV1_). Le verdict est mémorisé dans
+  // ECARTS_SCANS_REFERENCE ; une erreur ici ne doit jamais bloquer le rapport.
+  const scanLe = horodatageControleV1_(resultats);
+  let scanSuspect = null;
+  try {
+    const nbScanne = Object.keys(idsScannes).length;
+    let nbAttendu = 0;
+    if (hFilms.DernierControleDisponibilite !== undefined) {
+      for (let i = 1; i < donneesFilms.length; i++) {
+        const l = donneesFilms[i];
+        if (!String(l[hFilms.Titre] || "").trim() || !estDeCettePlateforme(l[hFilms.Plateforme])) continue;
+        if (String(l[hFilms.DernierControleDisponibilite] || "").trim()) nbAttendu++;
+      }
+    }
+    const evaluation = evaluerScanReferenceV1_(lireReferenceScanV1_(plateforme), scanLe, nbScanne, nbAttendu);
+    if (scanLe) ecrireReferenceScanV1_(plateforme, evaluation.ref);
+    if (evaluation.suspect) {
+      scanSuspect = {
+        nb: nbScanne, nbRef: evaluation.nbRef, scanLe: scanLe,
+        aAlerter: evaluation.ref.alerteLe !== scanLe,
+      };
+    }
+  } catch (e) {
+    Logger.log("RAPPORT_ECARTS : référence de contrôle illisible pour " + plateforme + " -- " + e.message);
   }
 
   // NOUVEAU (v1.7, 12/10/2026) -- on distingue deux cas d'absence :
@@ -367,7 +587,7 @@ function calculerEcartsRetraitV1_(plateforme) {
   // du premier constat) -- une simple absence du jour est mémorisée
   // sans être encore signalée. Dès qu'une fiche réapparaît dans un
   // scan, son compteur est remis à zéro (fausse alerte résolue).
-  return filtrerManquantsConfirmesV1_(plateforme, manquants);
+  return { manquants: filtrerManquantsConfirmesV1_(plateforme, manquants, scanLe, !!scanSuspect), scanSuspect: scanSuspect };
 }
 
 /**
@@ -391,13 +611,18 @@ function dateStrictementPasseeV1_(date, aujourdHui) {
   return d < aujourdHui;
 }
 
-function filtrerManquantsConfirmesV1_(plateforme, manquants) {
+function filtrerManquantsConfirmesV1_(plateforme, manquants, scanLe, scanSuspect) {
   const classeur = SpreadsheetApp.getActiveSpreadsheet();
   const NOM_FEUILLE = "ECARTS_RETRAIT_EN_ATTENTE";
+  const ENTETE = ["Plateforme", "IDFilm", "PremiereFoisVuManquantLe", "ScanDuPremierConstat"];
   let feuille = classeur.getSheetByName(NOM_FEUILLE);
   if (!feuille) {
     feuille = classeur.insertSheet(NOM_FEUILLE);
-    feuille.getRange(1, 1, 1, 3).setValues([["Plateforme", "IDFilm", "PremiereFoisVuManquantLe"]]).setFontWeight("bold");
+  }
+  // En-tête posé (ou complété : 4e colonne ajoutée le 29/10/2026) si besoin.
+  if (String(feuille.getRange(1, 4).getValue() || "").trim() !== ENTETE[3] ||
+      String(feuille.getRange(1, 1).getValue() || "").trim() !== ENTETE[0]) {
+    feuille.getRange(1, 1, 1, 4).setValues([ENTETE]).setFontWeight("bold");
   }
 
   const aujourdHui = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
@@ -405,7 +630,7 @@ function filtrerManquantsConfirmesV1_(plateforme, manquants) {
   // Charge l'état actuel (toutes plateformes -- on ne réécrit que la
   // ligne concernée, jamais les autres).
   const derniereLigne = feuille.getLastRow();
-  const lignesExistantes = derniereLigne >= 2 ? feuille.getRange(2, 1, derniereLigne - 1, 3).getValues() : [];
+  const lignesExistantes = derniereLigne >= 2 ? feuille.getRange(2, 1, derniereLigne - 1, 4).getValues() : [];
   const enAttente = {};
   const autresPlateformes = [];
   lignesExistantes.forEach(function (ligne) {
@@ -413,9 +638,9 @@ function filtrerManquantsConfirmesV1_(plateforme, manquants) {
     const id = String(ligne[1] || "").trim();
     if (!id) return;
     if (p === plateforme) {
-      enAttente[id] = String(ligne[2] || "").trim();
+      enAttente[id] = { date: jourDeCelluleV1_(ligne[2]), scan: String(ligne[3] || "").trim() };
     } else {
-      autresPlateformes.push(ligne);
+      autresPlateformes.push([ligne[0], ligne[1], jourDeCelluleV1_(ligne[2]) || ligne[2], String(ligne[3] || "")]);
     }
   });
 
@@ -423,30 +648,22 @@ function filtrerManquantsConfirmesV1_(plateforme, manquants) {
   const nouvelEtatPlateforme = [];
   manquants.forEach(function (m) {
     // MODIFIÉ (30/09/2026) -- priorité à la date théorique de retrait
-    // (déjà connue dans le Sheet) sur Ben : un film sans date théorique
-    // dépassée ne devrait normalement pas encore être manquant, mais
-    // au cas où (retrait anticipé réel, glitch plateforme...), la
-    // confirmation sur 2 scans reste le filet de sécurité en second
-    // recours -- jamais les deux logiques en même temps pour une même
-    // fiche, la date théorique tranche dès qu'elle est disponible.
+    // (déjà connue dans le Sheet sur Ben) sur la confirmation par contrôles.
     if (m.dateTheorique) {
       if (dateStrictementPasseeV1_(m.dateTheorique, aujourdHui)) {
         confirmes.push(m);
       }
-      // Date théorique connue mais pas encore dépassée (ex. dernier
-      // jour = aujourd'hui) -- pas confirmé, et pas la peine de suivre
-      // dans ECARTS_RETRAIT_EN_ATTENTE non plus : le prochain scan
-      // retranchera la même comparaison de date, sans mémoire requise.
+      // Date théorique connue mais pas encore dépassée -- pas confirmé, et
+      // pas la peine de suivre dans ECARTS_RETRAIT_EN_ATTENTE non plus.
       return;
     }
 
-    const datePremiereVue = enAttente[m.id];
-    if (datePremiereVue && datePremiereVue !== aujourdHui) {
-      confirmes.push(m);
-      nouvelEtatPlateforme.push([plateforme, m.id, datePremiereVue]);
-    } else {
-      nouvelEtatPlateforme.push([plateforme, m.id, datePremiereVue || aujourdHui]);
-    }
+    // MODIFIÉ (29/10/2026) -- sans date théorique : confirmation sur DEUX
+    // CONTRÔLES DIFFÉRENTS (et un autre jour), jamais deux lectures du même
+    // contrôle. Voir decisionRetraitSansDateV1_ et evaluerScanReferenceV1_.
+    const decision = decisionRetraitSansDateV1_(enAttente[m.id] || null, scanLe, aujourdHui, scanSuspect);
+    if (decision.confirme) confirmes.push(m);
+    if (decision.entree) nouvelEtatPlateforme.push([plateforme, m.id, decision.entree.date, decision.entree.scan || ""]);
   });
   // Les fiches de cette plateforme qui N'APPARAISSENT PLUS dans
   // manquants (réapparues dans le dernier scan), ou qui ont désormais
@@ -455,9 +672,12 @@ function filtrerManquantsConfirmesV1_(plateforme, manquants) {
   // zéro naturellement.
 
   const toutesLesLignes = autresPlateformes.concat(nouvelEtatPlateforme);
-  feuille.getRange(2, 1, Math.max(feuille.getMaxRows() - 1, toutesLesLignes.length), 3).clearContent();
+  // Colonnes en TEXTE (« @ ») pour que les dates/horodatages ne soient pas
+  // reconvertis par Google Sheets (cause de la comparaison faussée avant 29/10/2026).
+  feuille.getRange(2, 1, Math.max(feuille.getMaxRows() - 1, toutesLesLignes.length, 1), 4).setNumberFormat("@");
+  feuille.getRange(2, 1, Math.max(feuille.getMaxRows() - 1, toutesLesLignes.length, 1), 4).clearContent();
   if (toutesLesLignes.length > 0) {
-    feuille.getRange(2, 1, toutesLesLignes.length, 3).setValues(toutesLesLignes);
+    feuille.getRange(2, 1, toutesLesLignes.length, 4).setValues(toutesLesLignes);
   }
 
   return confirmes;
@@ -547,9 +767,15 @@ function construireHtmlRapportEcartsV1_(parPlateforme) {
   }
 
   const sections = parPlateforme.map(function (p) {
-    if (p.manquants.length === 0 && p.suggestions.length === 0 && p.ambiguites.length === 0) return "";
+    if (p.manquants.length === 0 && p.suggestions.length === 0 && p.ambiguites.length === 0 && !p.scanSuspect) return "";
 
     let html = '<div style="margin-top:20px"><div style="font-size:14px;font-weight:bold;color:#3A2E22">' + p.plateforme + '</div>';
+    if (p.scanSuspect) {
+      html += '<div style="margin-top:8px;padding:10px 12px;background:#FBEBD3;border:1px solid #E5B877;border-radius:6px;font-size:13px;color:#6B4A12;font-family:Arial,sans-serif">' +
+        '<b>Le dernier contrôle ' + p.plateforme + ' semble incomplet</b> : ' + p.scanSuspect.nb + ' fiches vues au lieu de ' + p.scanSuspect.nbRef +
+        ' au contrôle de référence. Aucun retrait sans date de départ n\'est proposé tant qu\'un nouveau contrôle ne l\'a pas confirmé. ' +
+        'Relance le contrôle ' + p.plateforme + '.</div>';
+    }
 
     if (p.manquants.length > 0) {
       const ligneManquant = function (m, message) {
