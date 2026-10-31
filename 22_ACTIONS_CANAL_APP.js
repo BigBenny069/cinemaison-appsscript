@@ -18,7 +18,8 @@
              - primeNettoyageApercu / primeNettoyageAppliquer : liste, puis
                efface, les dates de fin automatiques périmées des fiches
                Prime en Abonnement complémentaire / VOD.
- * Version : 1.2 (27/10/2026) -- ajout executerCanalRecontrolerBloques403V1 (voir 06 V4.9.1)
+ * Version : 1.3 (31/10/2026) -- executerCanalRecontrolerBloques403V1 recontrôle par petits lots (voir 33_CANAL_BLOCAGE_ET_RECONTROLE.js)
+ * (1.2 : 27/10/2026 -- ajout executerCanalRecontrolerBloques403V1, voir 06 V4.9.1)
  * (1.1 : 11/10/2026)
  *
  * Le webhook doit répondre vite (Vercel coupe les appels longs) : les deux
@@ -113,13 +114,16 @@ function executerCanalRecontrolerAVerifierV1() {
   }
 }
 
-/** V4.9.1 -- Déclencheur unique (1 h après un parcours) : recontrôle les fiches bloquées en 403. */
+/**
+ * V4.9.1 -- Déclencheur unique (1 h après un parcours) : recontrôle les fiches bloquées en 403.
+ * V1.3 (31/10/2026) : passe maintenant par petits lots avec sonde (33_CANAL_BLOCAGE_ET_RECONTROLE.js)
+ * au lieu d'une boucle unique sur toutes les fiches (limite de 6 min d'Apps Script dépassée, sans trace).
+ */
 function executerCanalRecontrolerBloques403V1() {
   supprimerDeclencheurCanalV4_("executerCanalRecontrolerBloques403V1");
+  journal_("CANAL_APP", "RECONTROLE_BLOQUES_403", "DECLENCHE", "Déclencheur +1 h parti");
   try {
-    const resultats = recontrolerFichesCanalAVerifierV1();
-    envoyerMailRecontroleCanalAppV1_(resultats);
-    journal_("CANAL_APP", "RECONTROLE_BLOQUES_403", "OK", "Fiches recontrôlées=" + resultats.length);
+    demarrerRecontrole403LotsV1();
   } catch (err) {
     journal_("CANAL_APP", "RECONTROLE_BLOQUES_403", "ERREUR", String(err));
     envoyerMailTexteCanalAppV1_("CinéMaison - V2 - CANAL+ : recontrôle des fiches bloquées en erreur", String(err));

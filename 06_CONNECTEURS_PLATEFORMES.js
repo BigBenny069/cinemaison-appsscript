@@ -3,10 +3,17 @@
  * CinéMaison V4
  * Script : 06_CONNECTEURS_PLATEFORMES.gs
  * Rôle   : Connecteurs plateformes — CANAL+ uniquement
- * Version: 4.9.3
+ * Version: 4.9.4
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs,
  *               Worker Cloudflare CANAL+ V3.7
  * ============================================================
+ *
+ * V4.9.4 (31/10/2026) -- Canal+ refusait (403) presque toutes les requêtes depuis le 29/10 sans que
+ * personne soit prévenu. (1) fin de parcours : alerte mail si plus de la moitié des fiches sont
+ * bloquées 2 jours différents d'affilée (33_CANAL_BLOCAGE_ET_RECONTROLE.js) ; (2) le recontrôle
+ * « 1 h après » des fiches bloquées passe par petits lots avec sonde (même fichier) ; (3) le bilan
+ * de fin de parcours affiche un avertissement si plus de la moitié est bloquée ; (4) un nouveau
+ * contrôle complet annule un recontrôle par lots resté en cours.
  *
  * V4.9.3 (28/10/2026) -- le mail des propositions de statut est réessayé (3 essais) en cas de
  * délai Google dépassé, et l'erreur active est fermée dès qu'il passe (cas réel du 27/10).
@@ -327,6 +334,9 @@ function controleCanalDisponibilitesCloudflare() {
 function demarrerControleCompletCanalV4() {
   const contexte = initialiserContexteCanalV41_();
   if (!contexte) return false;
+
+  // V4.9.4 : un recontrôle par lots resté en cours devient inutile, le parcours complet repasse sur toutes les fiches.
+  try { annulerRecontrole403LotsV1_("Un contrôle complet démarre"); } catch (errAnnul) { Logger.log("annulerRecontrole403LotsV1_ : " + errAnnul); }
 
 
   const etat = {
@@ -683,6 +693,13 @@ function terminerControleCompletCanalV4_(etat) {
   const contextePourBilan = initialiserContexteCanalV41_();
   if (contextePourBilan) {
     envoyerMailBilanFinParcoursCanalV4_(etat, contextePourBilan.sheet, contextePourBilan.h);
+  }
+
+  // V4.9.4 : alerte si plus de la moitié des fiches sont bloquées (403) 2 jours d'affilée.
+  try {
+    evaluerBlocageMassifCanalV1_(etat);
+  } catch (errBlocage) {
+    erreur_("CONNECTEURS", "CANAL_BLOCAGE_MASSIF", "Évaluation du blocage massif", String(errBlocage));
   }
 
   // V4.9.1 : fiches bloquées en 403 -> recontrôle automatique dans 1 h.
@@ -1976,8 +1993,15 @@ function envoyerMailBilanFinParcoursCanalV4_(etat, sheet, h) {
   const totalAVerifier = avecHttp.length + sansHttp.length;
   const rienASignaler = totalAVerifier === 0 && Number(etat.erreurs || 0) === 0;
 
+  const blocageMassif = Number(etat.traites || 0) >= 20 &&
+    Number(etat.bloques403 || 0) * 100 > getRegleNumber("CanalBlocageSeuilPourcent", 50) * Number(etat.traites || 0);
+
   const corps =
     "CinéMaison - Bilan de fin de parcours CANAL+\n\n" +
+    (blocageMassif
+      ? "⚠ ATTENTION : plus de la moitié des fiches sont bloquées par Canal+ (403). Les dates ne sont pas relues. " +
+        "Si cela dure 2 jours de suite, une alerte dédiée t'est envoyée.\n\n"
+      : "") +
     "✓ CONTRÔLE TERMINÉ -- parcours complet achevé, voici le bilan " +
     "final et définitif (contrairement au mail \"EN COURS\", qui n'est " +
     "qu'une photo partielle prise pendant le parcours).\n\n" +
@@ -1987,7 +2011,7 @@ function envoyerMailBilanFinParcoursCanalV4_(etat, sheet, h) {
     "  Plus de 6 mois : " + (etat.plusDe6Mois || 0) + "\n" +
     "  VOD sans date de fin (normal) : " + (etat.vodSansDate || 0) + "\n" +
     "  Bloquées par Canal+ (403), date précédente conservée : " + (etat.bloques403 || 0) +
-    (etat.bloques403 > 0 ? " (recontrôle automatique dans 1 h)" : "") + "\n" +
+    (etat.bloques403 > 0 ? " (recontrôle automatique par petits lots dès 1 h après)" : "") + "\n" +
     "  Changements de date réels : " + (etat.changements || 0) +
     (etat.changements > 0 ? " (voir le mail \"Modifications CANAL+\" séparé)" : "") + "\n" +
     "  Erreurs techniques : " + (etat.erreurs || 0) + "\n\n" +
