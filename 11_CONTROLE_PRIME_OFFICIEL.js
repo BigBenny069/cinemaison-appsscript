@@ -3,8 +3,22 @@
  * CinéMaison V4
  * Script  : 11_CONTROLE_PRIME_OFFICIEL.gs
  * Rôle    : Diagnostic et import sécurisé des résultats Prime Video officiels
- * Version : 1.11 (11/10/2026)
+ * Version : 1.12 (01/11/2026)
  * ============================================================
+ *
+ * Correctif V1.12 (01/11/2026) : une fiche détectée INCLUS sans date de
+ * départ par Prime, dont la date de fin automatique tombe LE JOUR MÊME du
+ * contrôle (ou avant), voit maintenant cette date effacée. Jusqu'ici
+ * (V1.10) seule une date STRICTEMENT passée l'était, donc un film dont la
+ * date de retrait était aujourd'hui mais que Prime a remis en ligne
+ * aujourd'hui restait affiché "retiré aujourd'hui" dans l'app. Cas
+ * signalé par Ben le 01/11/2026 (FILM0488, FILM0489 et d'autres). La
+ * comparaison se fait sur le jour du contrôle Prime (ControleLe), pas
+ * sur la date d'application. Mêmes garde-fous que V1.9/V1.10 : source
+ * Prime ou vide uniquement, date manuelle jamais touchée, date future
+ * jamais effacée. Une fiche que Prime annonce sur le départ ("Quitte
+ * Prime Video dans N jours") passe par DATE_DETECTEE et n'est pas
+ * concernée.
  *
  * Correctif V1.10 (09/10/2026) : même principe pour une fiche détectée
  * INCLUS (toujours dans l'abonnement) dont la date de fin automatique est
@@ -439,8 +453,9 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
     // date d'une autre source protégée.
     function effacerDateAutoSiAboOuVod_() {
       const aboOuVod = statutPrimeDetecte === "ABONNEMENT_COMPLEMENTAIRE" || statutPrimeDetecte === "VOD";
+      // V1.12 : <= jour du contrôle (et plus seulement < aujourd'hui).
       const inclusDatePerimee = statutPrimeDetecte === "INCLUS" &&
-        dateAutoStrictementPasseePrimeV1_(film.valeurs[hFilms.DateDisponibiliteAuto]);
+        dateAutoAuPlusTardJourPrimeV1_(film.valeurs[hFilms.DateDisponibiliteAuto], jourControle);
       if (!aboOuVod && !inclusDatePerimee) return;
       const dateAuto = film.valeurs[hFilms.DateDisponibiliteAuto];
       if (!dateAuto) return;
@@ -455,7 +470,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
       ecrireChampPrimeV110_(films, film.ligne, hFilms, "StatutDisponibilite", "");
       ecrireChampPrimeV110_(films, film.ligne, hFilms, "CommentaireDisponibilite",
         statutPrimeDetecte === "INCLUS"
-          ? "Prime Video : toujours disponible, ancienne date de fin dépassée (" + libelleDateSecurisePrimeV1_(dateAuto) +
+          ? "Prime Video : toujours disponible, ancienne date de fin atteinte ("  + libelleDateSecurisePrimeV1_(dateAuto) +
             ") effacée le " + formaterDatePrimeV110_(maintenant)
           : "Prime Video : fiche passée en " + (statutPrimeDetecte === "VOD" ? "VOD" : "abonnement complémentaire") +
             " -- date de fin automatique effacée le " + formaterDatePrimeV110_(maintenant));
@@ -1225,4 +1240,31 @@ function dateAutoStrictementPasseePrimeV1_(valeur) {
     }
   }
   return !!iso && iso < aujourdHui;
+}
+
+
+/**
+ * V1.12 -- true si la date de cellule (Date, yyyy-mm-dd ou dd/mm/yyyy)
+ * tombe le jour de reference ou AVANT (jourReference = Date, en general le
+ * jour du controle Prime).
+ */
+function dateAutoAuPlusTardJourPrimeV1_(valeur, jourReference) {
+  if (!valeur || !jourReference) return false;
+  const fuseau = Session.getScriptTimeZone();
+  if (Object.prototype.toString.call(jourReference) !== "[object Date]" || isNaN(jourReference.getTime())) return false;
+  const reference = Utilities.formatDate(jourReference, fuseau, "yyyy-MM-dd");
+  let iso = null;
+  if (Object.prototype.toString.call(valeur) === "[object Date]") {
+    if (isNaN(valeur.getTime())) return false;
+    iso = Utilities.formatDate(valeur, fuseau, "yyyy-MM-dd");
+  } else {
+    const t = String(valeur).trim();
+    let m = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) iso = m[0];
+    else {
+      m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      if (m) iso = m[3] + "-" + ("0" + m[2]).slice(-2) + "-" + ("0" + m[1]).slice(-2);
+    }
+  }
+  return !!iso && iso <= reference;
 }
