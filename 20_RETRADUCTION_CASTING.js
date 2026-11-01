@@ -11,7 +11,8 @@
  *           enrichies avant lui. Constaté par Ben : 118 fiches sur
  *           997 concernées à cette date (29/09/2026), surtout des
  *           films japonais/coréens/chinois.
- * Version : 1.0 (29/09/2026)
+ * Version : 1.1 (02/11/2026) -- lit aussi la colonne facultative TMDbSerie (voir 02_TMDB.gs V4.7.0).
+ * Version initiale : 1.0 (29/09/2026)
  * ============================================================
  *
  * Job PONCTUEL, pas récurrent : une fois le retard rattrapé, plus
@@ -139,7 +140,7 @@ function traiterLotRetraductionCastingV1_() {
     if (!tmdbId) { traitees++; continue; }
 
     try {
-      const detail = chargerDetailTMDbAvecRepli_(tmdbId, type, apiKey, "Retraduction casting", null);
+      const detail = chargerDetailTMDbAvecRepli_(tmdbId, type, apiKey, "Retraduction casting", null, safeTrim_(row[h.TMDbSerie]));
       const casting = detail.casting || "";
       const realisateur = detail.realisateur || "";
 

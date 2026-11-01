@@ -3,10 +3,13 @@
  * CinéMaison V4
  * Script : 04_DISPONIBILITES_TMDB.gs
  * Rôle   : Watch Providers TMDb uniquement
- * Version: 4.0.2
+ * Version: 4.0.3
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs
  * IMPORTANT : ne touche jamais DateDisponibiliteAuto.
  * ============================================================
+ *
+ * Correctif V4.0.3 (02/11/2026) : colonne facultative TMDbSerie (voir 02_TMDB.gs V4.7.0) --
+ * si elle vaut « oui », l'identifiant TMDb est interrogé sur /tv même si le Type n'est pas Série.
  *
  * Correctif V4.0.2 (22/10/2026) : nettoyage (audit) -- retrait de la
  * fonction inutilisée majDisponibiliteLigne_. Aucun changement de
@@ -83,7 +86,7 @@ function controleWatchProvidersTMDbV4() {
 
 
       try {
-        const result = getWatchProviders_(tmdbId, type, apiKey);
+        const result = getWatchProviders_(tmdbId, type, apiKey, get_(row, h, "TMDbSerie"));
         const plateformes = result.plateformes || "";
 
 
@@ -147,13 +150,13 @@ function controleWatchProvidersTMDbV4() {
   }
 }
 
-function getWatchProviders_(tmdbId, type, apiKeyParam) {
+function getWatchProviders_(tmdbId, type, apiKeyParam, tmdbSerie) {
   const apiKey = apiKeyParam || lireConfig_("TMDbApiKey", "");
   if (!apiKey) return { plateformes: "" };
 
 
   avertirSiTypeInattendu_(type, "getWatchProviders_");
-  const endpoint = type === "Série" ? "tv" : "movie";
+  const endpoint = endpointTmdbV1_(type, tmdbSerie);
   const pays = paysWatchProvider_();
 
 

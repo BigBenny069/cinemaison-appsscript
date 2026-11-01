@@ -3,7 +3,15 @@
  * CinéMaison V4
  * Script : 02_TMDB.gs
  * Rôle   : Recherche et enrichissement TMDb fiabilisés
- * Version: 4.6.7
+ * Version: 4.7.0
+ *
+ * Evolution V4.7.0 (02/11/2026) : certains films (ex. « Mel Brooks: The 99 Year Old Man! »,
+ * documentaire HBO) sont classés SÉRIE par TMDb alors que Ben les range en Documentaire/Film.
+ * Un identifiant TMDb de série n'a rien à voir avec celui d'un film (mêmes numéros réutilisés) :
+ * lu comme un film, il pouvait donner un AUTRE film sans erreur. Nouvelle colonne facultative
+ * « TMDbSerie » (valeur « oui » quand l'identifiant TMDb est celui d'une série) : si elle est
+ * remplie, l'endpoint /tv est utilisé quel que soit le Type, sans repli sur /movie. Colonne
+ * vide = comportement inchangé. ajouterColonneTMDbSerieV1() crée la colonne (à lancer une fois).
  *
  * Correctif V4.6.7 (30/09/2026) : guillemets typographiques ("..."/
  * '...') et tirets cadratins ajoutés à la ponctuation autorisée --
@@ -69,7 +77,19 @@
  */
 
 
-function chercherTMDb_(titre, annee, type, realisateurActuel, tmdbIdManuel) {
+// V4.7.0 -- « oui » (ou tv / série / 1 / true) dans la colonne TMDbSerie = identifiant TMDb de SÉRIE.
+function tmdbEstSerieV1_(valeur) {
+  return /^(oui|tv|serie|série|1|true|vrai)$/i.test(String(valeur == null ? "" : valeur).trim());
+}
+
+
+// V4.7.0 -- endpoint TMDb à interroger : /tv si le Type est Série OU si l'identifiant est marqué série.
+function endpointTmdbV1_(type, tmdbSerie) {
+  return (type === "Série" || tmdbEstSerieV1_(tmdbSerie)) ? "tv" : "movie";
+}
+
+
+function chercherTMDb_(titre, annee, type, realisateurActuel, tmdbIdManuel, tmdbSerie) {
   try {
     const apiKey = lireConfig_("TMDbApiKey", "");
 
@@ -87,7 +107,9 @@ function chercherTMDb_(titre, annee, type, realisateurActuel, tmdbIdManuel) {
         tmdbIdManuel,
         type,
         apiKey,
-        "TMDbID manuel prioritaire"
+        "TMDbID manuel prioritaire",
+        undefined,
+        tmdbSerie
       );
 
 
@@ -261,10 +283,16 @@ function choisirMeilleurResultatTMDb_(titre, annee, resultats) {
  * signifie "mauvais endpoint", tout le reste est une vraie erreur à
  * remonter telle quelle.
  */
-function chargerDetailTMDbAvecRepli_(tmdbId, type, apiKey, commentaireMatching, scoreForce) {
+function chargerDetailTMDbAvecRepli_(tmdbId, type, apiKey, commentaireMatching, scoreForce, tmdbSerie) {
   avertirSiTypeInattendu_(type, "chargerDetailTMDbAvecRepli_");
-  const endpointPrincipal = type === "Série" ? "tv" : "movie";
+  const endpointPrincipal = endpointTmdbV1_(type, tmdbSerie);
   const endpointAlterne = endpointPrincipal === "tv" ? "movie" : "tv";
+
+  // V4.7.0 -- identifiant explicitement marqué « série » : pas de repli sur /movie (un même
+  // numéro existe souvent aussi chez les films : on lirait un AUTRE film sans erreur).
+  if (tmdbEstSerieV1_(tmdbSerie)) {
+    return chargerDetailTMDbSurEndpoint_(tmdbId, "tv", apiKey, commentaireMatching, scoreForce);
+  }
 
 
   try {
@@ -790,4 +818,30 @@ function testerRepliEndpointTMDbV461() {
   }
   Logger.log("OK | Repli d'endpoint fonctionnel | Titre=" + resultat.titreOriginal);
   Logger.log("===== FIN TEST REPLI ENDPOINT =====");
+}
+
+
+
+/**
+ * V4.7.0 -- À lancer UNE SEULE FOIS depuis l'éditeur Apps Script : ajoute la colonne facultative
+ * « TMDbSerie » à la feuille Films si elle n'existe pas. Vide = identifiant TMDb de film (cas
+ * normal) ; « oui » = identifiant TMDb de série (film classé série par TMDb). Sans effet si
+ * relancée.
+ */
+function ajouterColonneTMDbSerieV1() {
+  const classeur = SpreadsheetApp.getActiveSpreadsheet();
+  const films = classeur.getSheetByName("Films");
+  if (!films) throw new Error("La feuille Films est introuvable.");
+
+  const entetes = films.getRange(1, 1, 1, films.getLastColumn()).getValues()[0]
+    .map(function(e) { return String(e || "").trim(); });
+
+  if (entetes.indexOf("TMDbSerie") !== -1) {
+    Logger.log("TMDbSerie existe déjà -- rien fait.");
+    return;
+  }
+
+  const colonne = films.getLastColumn() + 1;
+  films.getRange(1, colonne).setValue("TMDbSerie").setFontWeight("bold");
+  Logger.log("Colonne TMDbSerie ajoutée (colonne " + colonne + ").");
 }

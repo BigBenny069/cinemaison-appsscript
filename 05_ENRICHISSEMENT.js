@@ -3,7 +3,11 @@
  * CinéMaison V4
  * Script : 05_ENRICHISSEMENT.gs
  * Rôle   : Orchestration TMDb + Letterboxd
- * Version: 4.6.6
+ * Version: 4.6.7
+ *
+ * Correctif V4.6.7 (02/11/2026) : colonne facultative TMDbSerie (voir 02_TMDB.gs V4.7.0) -- l'identifiant
+ * TMDb d'un film classé série par TMDb est lu sur /tv ; sa redirection Letterboxd /tmdb/ n'est
+ * pas tentée (elle désignerait un film portant le même numéro).
  *
  * Correctif V4.6.6 (25/09/2026) : forcerReenrichissementFicheParCleV452_
  * cherchait une fiche par ID sur la colonne "IDFilm", qui n'existe
@@ -1100,6 +1104,9 @@ function enrichirUneLigneV4_(
   let tmdbId =
     get_(row, h, "TMDbID");
 
+  const tmdbSerie =
+    get_(row, h, "TMDbSerie");
+
   let imdbId =
     get_(row, h, "IMDbID");
 
@@ -1175,7 +1182,8 @@ function enrichirUneLigneV4_(
         annee,
         type,
         realisateurActuel,
-        tmdbIdRecherche
+        tmdbIdRecherche,
+        tmdbSerie
       );
 
     // CORRECTIF (25/09/2026) -- si le titre/année/type a changé depuis
@@ -1203,7 +1211,8 @@ function enrichirUneLigneV4_(
           annee,
           type,
           realisateurActuel,
-          tmdbId
+          tmdbId,
+          tmdbSerie
         );
 
       if (tmdbAvecIdExistant && tmdbAvecIdExistant.valide) {
@@ -1291,7 +1300,7 @@ function enrichirUneLigneV4_(
         annee,
         imdbId,
         urlLetterboxdRecherche,
-        tmdbId,
+        tmdbEstSerieV1_(tmdbSerie) ? "" : tmdbId,
         titreOriginal,
         type
       );
