@@ -3,10 +3,14 @@
  * CinéMaison V4
  * Script : 06_CONNECTEURS_PLATEFORMES.gs
  * Rôle   : Connecteurs plateformes — CANAL+ uniquement
- * Version: 4.9.4
+ * Version: 4.9.5
  * Dépendances : 00_CONFIG.gs, 01_UTILS.gs,
  *               Worker Cloudflare CANAL+ V3.7
  * ============================================================
+ *
+ * V4.9.5 (01/11/2026) -- Correctif : la fonction de test testCanalEnrichCloudflare() interrogeait un
+ * ancien film (Fury 4778458_50035) ; elle utilise maintenant le Fury de la liste de Ben
+ * (42751576_50889). Aucun autre changement.
  *
  * V4.9.4 (31/10/2026) -- Canal+ refusait (403) presque toutes les requêtes depuis le 29/10 sans que
  * personne soit prévenu. (1) fin de parcours : alerte mail si plus de la moitié des fiches sont
@@ -2483,7 +2487,7 @@ function testCanalEnrichCloudflare() {
   const result = canalEnrichCloudflareV4_(
     "Fury",
     "2014",
-    "4778458_50035"
+    "42751576_50889"
   );
 
 
