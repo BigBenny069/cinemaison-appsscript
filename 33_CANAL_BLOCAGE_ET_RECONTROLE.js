@@ -23,7 +23,12 @@
  *      on réessaie 3 h plus tard, 3 fois au maximum. Mail de résultat à
  *      la fin, journal à chaque étape.
  *
- * Version : 1.0 (31/10/2026)
+ * Version : 1.1 (01/11/2026)
+ * Correctif V1.1 (01/11/2026) : le mail d'alerte dit de vérifier EN PREMIER la
+ * variable Cloudflare CANAL_CHROME_VERSION (le blocage du 29/10 venait d'un
+ * numéro de Chrome trop ancien annoncé par le Worker), avant les autres valeurs.
+ *
+ * Version initiale : 1.0 (31/10/2026)
  * Dépend de : 06_CONNECTEURS_PLATEFORMES.js (controleCanalLigneV4_,
  *             supprimerDeclencheurCanalV4_, CANAL_MARQUEUR_403_V1,
  *             BUDGET_LOT_CANAL_MS_V41), 22_ACTIONS_CANAL_APP.js
@@ -142,10 +147,15 @@ function envoyerMailBlocageMassifCanalV1_(mesure, etat) {
     "et lance la fonction testCanalEnrichCloudflare (une seule requête). " +
     "Regarde le code « httpStatus » dans le journal : 403 = Canal+ refuse, " +
     "401 = clé de session expirée.\n" +
-    "2. Si c'est 403 ou 401 : recopie les valeurs d'une vraie session Canal+ " +
-    "(F12 > Réseau > une requête /actionLayout/) dans les secrets du Worker " +
-    "Cloudflare : CANAL_ACTION_PASS, CANAL_TOKENPASS, CANAL_HODOR_COOKIE.\n" +
-    "3. Ne lance pas de contrôle complet tant que l'accès est bloqué : " +
+    "2. Si c'est 403 : dans F12 (une requête Canal+), regarde l'en-tête " +
+    "user-agent : le numéro après « Chrome/ » doit être le même que la " +
+    "variable Cloudflare CANAL_CHROME_VERSION du Worker (cause du blocage " +
+    "du 29/10/2026). Sinon, mets-la à jour.\n" +
+    "3. Si c'est toujours 403 ou 401 : recopie les valeurs d'une vraie session " +
+    "Canal+ (F12 > Réseau > une requête /actionLayout/) dans le Worker " +
+    "Cloudflare : CANAL_ACTION_PASS, CANAL_TOKENPASS, CANAL_CRKEY, " +
+    "CANAL_HODOR_COOKIE.\n" +
+    "4. Ne lance pas de contrôle complet tant que l'accès est bloqué : " +
     "cela ne servirait à rien et peut prolonger le blocage.\n\n" +
     "Ce mail n'est envoyé qu'une fois par épisode. Un autre mail t'avertira " +
     "quand Canal+ répondra de nouveau normalement.";
