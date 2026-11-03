@@ -10,7 +10,16 @@
  *           disponibilité, plateforme, raison probable, et un lien
  *           "Retirer de CinéMaison" (même page de confirmation que le
  *           rapport "Écarts plateformes", api/confirm.js?page=remove).
- * Version : 1.4 (10/10/2026)
+ * Version : 1.5 (03/11/2026)
+ *
+ * V1.5 (03/11/2026) : la page "Ma Liste" de Canal+ plafonne ce qu'elle affiche
+ * (liste longue) : les derniers films ajoutés peuvent être bien dans la liste
+ * sans que canal.js puisse les lire. Une fiche "absente de Ma Liste" dont la
+ * date de fin n'est pas atteinte ET dont le contrôle des dates (Cloudflare) a
+ * réussi dans les 3 derniers jours (statut DATE_CONNUE ou PLUS_DE_6_MOIS, pas
+ * de 404) passe dans une section grisée "PRÉSENTE CHEZ CANAL+ MAIS NON VISIBLE
+ * DANS MA LISTE", sans lien de retrait et sans compter dans "à examiner".
+ * Les vrais retraits (date dépassée, 404) sont signalés comme avant.
  *
  * V1.4 : le mail propose, sur les fiches "absentes de Ma Liste", un lien
  * "Garder hors de Ma Liste" (api/confirm?page=horsListeCanal) qui écrit "oui"
@@ -71,6 +80,9 @@ const CANAL_DERNIER_SCAN_FEUILLE_V1 = "CANAL_DERNIER_SCAN";
 // défilement incomplet...) et on NE signale PAS "absentes de la
 // liste" -- seulement les dates dépassées.
 const CANAL_ECARTS_SEUIL_SCAN_COMPLET_V1 = 0.6;
+// V1.5 : un contrôle de dates réussi depuis moins de ce nombre de jours prouve
+// que la fiche existe toujours chez Canal+, même si Ma Liste ne l'affiche pas.
+const CANAL_ECARTS_JOURS_CONTROLE_RECENT_V1 = 3;
 
 /**
  * Appelée par 09_WEBHOOK.js (traiterAlerteSuggestionsStreamingV1_)
@@ -142,6 +154,7 @@ function lireDateCanalEcartsV1_(valeur) {
  * Chaque fiche : { id, titre, affiche, plateforme, dateFinFr, categorie,
  *   raison, aContentId }
  * categorie : "HORS_CONTROLE" | "EXPIRE" | "HTTP_404" | "ABSENT_DATE_FUTURE" | "ABSENT_SANS_DATE"
+ *   | "ABSENT_CONTROLE_OK" (V1.5) | "HORS_LISTE_VOLONTAIRE"
  */
 function calculerEcartsCanalV1_() {
   const classeur = SpreadsheetApp.getActiveSpreadsheet();
@@ -156,6 +169,9 @@ function calculerEcartsCanalV1_() {
 
   const aujourdHui = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
   const scan = lireDernierScanCanalV1_();
+  const ilYa3Jours = Utilities.formatDate(
+    new Date(Date.now() - CANAL_ECARTS_JOURS_CONTROLE_RECENT_V1 * 24 * 60 * 60 * 1000),
+    Session.getScriptTimeZone(), "yyyy-MM-dd");
 
   // Fiches CANAL+ du Sheet
   const fichesCanal = [];
@@ -203,6 +219,9 @@ function calculerEcartsCanalV1_() {
     const commentaire = h.CommentaireDisponibilite !== undefined ? String(ligne[h.CommentaireDisponibilite] || "") : "";
     const statutAuto = h.StatutDisponibiliteAuto !== undefined ? String(ligne[h.StatutDisponibiliteAuto] || "").trim() : "";
     const http404 = statutAuto === "A_VERIFIER_CANAL" && /HTTP[^0-9]{0,15}404/i.test(commentaire);
+    const dernierControle = h.DernierControleDisponibilite !== undefined ? lireDateCanalEcartsV1_(ligne[h.DernierControleDisponibilite]) : null;
+    const controleRecentOk = !!dernierControle && dernierControle.iso >= ilYa3Jours &&
+      (statutAuto === "DATE_CONNUE" || statutAuto === "PLUS_DE_6_MOIS") && !http404;
     const horsControle = normalizePlatform_(ligne[h.Plateforme]) !== "CANAL+";
     const expire = !!date && date.iso < aujourdHui && !dansLaListe;
     const absent = scanUtilisable && !dansLaListe;
@@ -231,6 +250,10 @@ function calculerEcartsCanalV1_() {
     if (absent) {
       if (expire) {
         notes.push("Absent de Ma Liste.");
+      } else if (date && controleRecentOk) {
+        if (!categorie) categorie = "ABSENT_CONTROLE_OK";
+        notes.push("Absent de l'affichage de Ma Liste, mais le contrôle des dates Canal+ l'a trouvé il y a moins de " +
+          CANAL_ECARTS_JOURS_CONTROLE_RECENT_V1 + " jours (date de fin connue, pas d'erreur) : probablement au-delà de la limite d'affichage de Ma Liste.");
       } else if (date) {
         if (!categorie) categorie = "ABSENT_DATE_FUTURE";
         notes.push("Absent de Ma Liste alors que la date de fin n'est pas atteinte (retiré à la main ? changement de chaîne ?).");
@@ -266,7 +289,7 @@ function calculerEcartsCanalV1_() {
     });
   });
 
-  const ordre = { HORS_CONTROLE: 0, EXPIRE: 1, HTTP_404: 2, ABSENT_DATE_FUTURE: 3, ABSENT_SANS_DATE: 4, HORS_LISTE_VOLONTAIRE: 5 };
+  const ordre = { HORS_CONTROLE: 0, EXPIRE: 1, HTTP_404: 2, ABSENT_DATE_FUTURE: 3, ABSENT_SANS_DATE: 4, ABSENT_CONTROLE_OK: 5, HORS_LISTE_VOLONTAIRE: 6 };
   fiches.sort(function (a, b) {
     if (ordre[a.categorie] !== ordre[b.categorie]) return ordre[a.categorie] - ordre[b.categorie];
     return a.titre.localeCompare(b.titre, "fr");
@@ -274,7 +297,7 @@ function calculerEcartsCanalV1_() {
 
   return {
     fiches: fiches,
-    nombreAExaminer: fiches.filter(function (f) { return f.categorie !== "HORS_LISTE_VOLONTAIRE"; }).length,
+    nombreAExaminer: fiches.filter(function (f) { return f.categorie !== "HORS_LISTE_VOLONTAIRE" && f.categorie !== "ABSENT_CONTROLE_OK"; }).length,
     totalCanal: totalCanal,
     scan: scan,
     scanUtilisable: scanUtilisable,
@@ -317,6 +340,7 @@ function construireHtmlCanalEcartsV1_(resultat) {
     { cle: "HTTP_404", titre: "PAGE INTROUVABLE SUR CANAL+ (HTTP 404)", aide: "Le film n'existe plus à cette adresse : très probablement retiré de Canal+." },
     { cle: "ABSENT_DATE_FUTURE", titre: "ABSENTS DE MA LISTE (DATE PAS ENCORE ATTEINTE)", aide: "À vérifier : retirés à la main, ou passés sur une autre chaîne ?" },
     { cle: "ABSENT_SANS_DATE", titre: "ABSENTS DE MA LISTE (SANS DATE)", aide: "À vérifier : jamais ajoutés dans Ma Liste, ou titre non reconnu ?" },
+    { cle: "ABSENT_CONTROLE_OK", titre: "PRÉSENTES CHEZ CANAL+ MAIS NON VISIBLES DANS MA LISTE (RIEN À FAIRE)", aide: "Le contrôle des dates les a trouvées il y a moins de 3 jours : Ma Liste n'affiche sans doute pas tout (limite d'affichage). Rien à retirer.", discret: true },
     { cle: "HORS_LISTE_VOLONTAIRE", titre: "HORS LISTE VOLONTAIREMENT (RIEN À FAIRE)", aide: "Marquées « oui » dans la colonne HorsListeCanal. Elles restent suivies par le contrôle des dates.", discret: true },
   ];
 
@@ -417,7 +441,7 @@ function genererEtEnvoyerRapportCanalEcartsV1() {
 
   journal_(
     "CANAL_ECARTS", "RAPPORT", destinataires ? "OK" : "IGNORE_SANS_DESTINATAIRE",
-    "Codes chaîne inconnus=" + Object.keys(resultat.codesInconnus || {}).join(",") + " | A examiner=" + nombre + " | Hors liste volontaire=" + (resultat.fiches.length - nombre) + " | Total CANAL+=" + resultat.totalCanal +
+    "Codes chaîne inconnus=" + Object.keys(resultat.codesInconnus || {}).join(",") + " | A examiner=" + nombre + " | Hors liste volontaire ou non visibles (contrôle OK)=" + (resultat.fiches.length - nombre) + " | Total CANAL+=" + resultat.totalCanal +
     " | Scan=" + (resultat.scan ? resultat.scan.nombre : "aucun") +
     (resultat.avertissement ? " | " + resultat.avertissement : "")
   );
