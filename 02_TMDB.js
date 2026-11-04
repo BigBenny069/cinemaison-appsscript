@@ -465,6 +465,7 @@ function chargerDetailTMDbSurEndpoint_(tmdbId, endpoint, apiKey, commentaireMatc
 
 
   let json = parserJsonTMDb_(res.getContentText(), "détail ID " + tmdbId);
+  let relecturePassee = false;
 
 
   // CORRECTIF (04/11/2026) -- cas FILM0583 : fiche TMDb créée à la main,
@@ -484,6 +485,7 @@ function chargerDetailTMDbSurEndpoint_(tmdbId, endpoint, apiKey, commentaireMatc
         const json2 = parserJsonTMDb_(res2.getContentText(), "détail ID " + tmdbId + " (relecture)");
         if (!reponseVide(json2)) {
           json = json2;
+          relecturePassee = true;
           Logger.log("TMDb ID " + tmdbId + " : la relecture sans cache a ramené des données");
         }
       }
@@ -576,7 +578,20 @@ function chargerDetailTMDbSurEndpoint_(tmdbId, endpoint, apiKey, commentaireMatc
     genrePrincipal: genrePrincipal,
     score: scoreForce || 100,
     commentaireMatching: commentaireMatching || "",
-    bandeAnnonce: bandeAnnonce
+    bandeAnnonce: bandeAnnonce,
+    // DIAGNOSTIC (04/11/2026) -- résumé de ce que TMDb a réellement renvoyé,
+    // écrit dans JOURNAL quand la fiche revient vide (cas FILM0583).
+    diag:
+      "endpoint=" + endpoint +
+      " | id=" + json.id +
+      " | titre=" + (json.title || json.name || "") +
+      " | langue=" + (json.original_language || "") +
+      " | synopsis=" + String(json.overview || "").length + " car." +
+      " | poster=" + (json.poster_path ? "oui" : "non") +
+      " | genres=" + ((json.genres && json.genres.length) || 0) +
+      " | duree=" + (json.runtime || 0) +
+      " | acteurs=" + cast.length +
+      " | releve_sans_cache=" + (relecturePassee ? "oui" : "non")
   };
 }
 
