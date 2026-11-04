@@ -1234,7 +1234,7 @@ function enrichirUneLigneV4_(
       );
 
       tmdbId = tmdb.tmdbId;
-      imdbId = tmdb.imdbId;
+      imdbId = tmdb.imdbId || imdbId;
       titreOriginal =
         tmdb.titreOriginal ||
         titreOriginal;
@@ -1517,14 +1517,18 @@ function ecrireResultatTmdbV4_(
     }
   );
 
-  setProtected_(
-    sheet,
-    rowNumber,
-    h,
-    "IMDbID",
-    tmdb.imdbId,
-    { force: true }
-  );
+  // CORRECTIF (04/11/2026) -- on n'écrase plus un IMDbID existant par une
+  // valeur vide (TMDb sans lien IMDb sur une fiche créée à la main).
+  if (tmdb.imdbId) {
+    setProtected_(
+      sheet,
+      rowNumber,
+      h,
+      "IMDbID",
+      tmdb.imdbId,
+      { force: true }
+    );
+  }
 
   setProtected_(
     sheet,
@@ -1720,6 +1724,39 @@ function estFicheIncompleteV4_(
       noteLetterboxd,
       votesLetterboxd
     );
+
+  // CORRECTIF (04/11/2026) -- cas FILM0583 : fiche TMDb créée à la main,
+  // lue une première fois alors qu'elle était encore presque vide. La
+  // ligne passait en "OK" avec affiche/synopsis/genre vides et n'était plus
+  // JAMAIS relue (cette fonction ne regardait que TMDbID, identification
+  // et Letterboxd). Une fiche "OK" dont l'affiche OU le synopsis manque
+  // est maintenant relue, au plus une fois par 24 h (pour ne pas
+  // interroger TMDb toutes les 10 minutes pour un film qui n'aura jamais
+  // d'affiche).
+  const donneesTmdbManquantes =
+    isBlank_(get_(row, h, "Affiche")) ||
+    isBlank_(get_(row, h, "Synopsis"));
+
+  const dernier = get_(row, h, "DernierEnrichissement");
+  let derniereTentativeMs = 0;
+  if (dernier instanceof Date) {
+    derniereTentativeMs = dernier.getTime();
+  } else {
+    const m = String(dernier || "").match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (m) derniereTentativeMs = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime();
+  }
+  const reessaiPossible =
+    !derniereTentativeMs ||
+    Date.now() - derniereTentativeMs >= 24 * 60 * 60 * 1000;
+
+  if (
+    tmdbId &&
+    etatIdentification === "OK" &&
+    donneesTmdbManquantes &&
+    reessaiPossible
+  ) {
+    return true;
+  }
 
   return !(
     tmdbId &&
