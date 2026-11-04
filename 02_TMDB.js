@@ -464,7 +464,33 @@ function chargerDetailTMDbSurEndpoint_(tmdbId, endpoint, apiKey, commentaireMatc
   }
 
 
-  const json = parserJsonTMDb_(res.getContentText(), "détail ID " + tmdbId);
+  let json = parserJsonTMDb_(res.getContentText(), "détail ID " + tmdbId);
+
+
+  // CORRECTIF (04/11/2026) -- cas FILM0583 : fiche TMDb créée à la main,
+  // d'abord lue presque vide ; ensuite complétée sur le site, mais l'API
+  // (ou un cache intermédiaire) continuait à renvoyer la version vide.
+  // Si la réponse ne contient NI synopsis, NI affiche, NI genre, NI durée,
+  // on redemande UNE fois avec un paramètre inutile (&_=horodatage) qui
+  // contourne un éventuel cache. Si cette 2e réponse est en erreur ou
+  // n'est pas meilleure, on garde la première : aucun risque pour les
+  // fiches normales (cette 2e requête n'a lieu que pour une fiche vide).
+  const reponseVide = (j) =>
+    !j.overview && !j.poster_path && !(j.genres && j.genres.length) && !j.runtime;
+  if (reponseVide(json)) {
+    try {
+      const res2 = fetchTMDbAvecRetry_(url + "&_=" + new Date().getTime(), "détail ID " + tmdbId + " (relecture sans cache)");
+      if (res2.getResponseCode() === 200) {
+        const json2 = parserJsonTMDb_(res2.getContentText(), "détail ID " + tmdbId + " (relecture)");
+        if (!reponseVide(json2)) {
+          json = json2;
+          Logger.log("TMDb ID " + tmdbId + " : la relecture sans cache a ramené des données");
+        }
+      }
+    } catch (eRelecture) {
+      Logger.log("Relecture TMDb sans cache échouée pour " + tmdbId + " : " + eRelecture.message);
+    }
+  }
 
 
   const credits = json.credits || {};
