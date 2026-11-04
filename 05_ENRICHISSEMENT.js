@@ -1233,6 +1233,17 @@ function enrichirUneLigneV4_(
         tmdbId
       );
 
+      // DIAGNOSTIC (04/11/2026) -- fiche TMDb "valide" mais sans affiche ni
+      // synopsis : on garde une trace de ce que TMDb a renvoyé.
+      if (!tmdb.affiche && !tmdb.synopsis) {
+        journal_(
+          "ENRICHISSEMENT",
+          "DIAG_TMDB_VIDE",
+          "INFO",
+          "ligne " + rowNumber + " | " + (tmdb.diag || "pas de détail")
+        );
+      }
+
       tmdbId = tmdb.tmdbId;
       imdbId = tmdb.imdbId || imdbId;
       titreOriginal =
