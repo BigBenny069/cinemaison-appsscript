@@ -479,18 +479,28 @@ function chargerDetailTMDbSurEndpoint_(tmdbId, endpoint, apiKey, commentaireMatc
   const reponseVide = (j) =>
     !j.overview && !j.poster_path && !(j.genres && j.genres.length) && !j.runtime;
   if (reponseVide(json)) {
-    try {
-      const res2 = fetchTMDbAvecRetry_(url + "&_=" + new Date().getTime(), "détail ID " + tmdbId + " (relecture sans cache)");
-      if (res2.getResponseCode() === 200) {
-        const json2 = parserJsonTMDb_(res2.getContentText(), "détail ID " + tmdbId + " (relecture)");
-        if (!reponseVide(json2)) {
-          json = json2;
-          relecturePassee = true;
-          Logger.log("TMDb ID " + tmdbId + " : la relecture sans cache a ramené des données");
+    // V2 (04/11/2026) -- le simple paramètre "&_=" n'a pas suffi (diagnostic
+    // JOURNAL : relecture sans effet). On change donc un paramètre que TMDb
+    // connaît (la langue) : une autre langue = une autre entrée de cache.
+    // Ordre : français court, puis anglais (synopsis en anglais plutôt que rien).
+    const variantes = [
+      url.replace("language=fr-FR", "language=fr"),
+      url.replace("language=fr-FR", "language=en-US"),
+    ];
+    for (let v = 0; v < variantes.length && reponseVide(json); v++) {
+      try {
+        const res2 = fetchTMDbAvecRetry_(variantes[v], "détail ID " + tmdbId + " (relecture variante " + (v + 1) + ")");
+        if (res2.getResponseCode() === 200) {
+          const json2 = parserJsonTMDb_(res2.getContentText(), "détail ID " + tmdbId + " (relecture)");
+          if (!reponseVide(json2)) {
+            json = json2;
+            relecturePassee = true;
+            Logger.log("TMDb ID " + tmdbId + " : la relecture (variante " + (v + 1) + ") a ramené des données");
+          }
         }
+      } catch (eRelecture) {
+        Logger.log("Relecture TMDb échouée pour " + tmdbId + " : " + eRelecture.message);
       }
-    } catch (eRelecture) {
-      Logger.log("Relecture TMDb sans cache échouée pour " + tmdbId + " : " + eRelecture.message);
     }
   }
 
