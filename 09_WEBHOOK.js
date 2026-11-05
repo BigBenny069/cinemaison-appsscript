@@ -848,7 +848,10 @@ function relancerVerificationEtMailDisney() {
  * @return {boolean} true si cette même requête a déjà été traitée
  *   dans les 2 dernières minutes (mail déjà envoyé -- ne pas recommencer)
  */
-function dejaTraiteRecemment_(cle) {
+// Durée de l'anti-doublon des mails Canal+ (suggestions + écarts) : 10 minutes.
+const DUREE_ANTI_DOUBLON_CANAL_SEC_ = 600;
+
+function dejaTraiteRecemment_(cle, dureeSecondes) {
   const cache = CacheService.getScriptCache();
   // CORRECTIF (22/09/2026) -- CacheService refuse toute clé de plus de
   // 250 caractères ("Argument too large: key") -- la signature d'un
@@ -865,7 +868,9 @@ function dejaTraiteRecemment_(cle) {
   const hash = hashBrut.map(function(o) { return (o < 0 ? o + 256 : o).toString(16).padStart(2, "0"); }).join("");
   const cleCache = "webhook_dedup_" + hash;
   if (cache.get(cleCache)) return true;
-  cache.put(cleCache, "1", 120); // 120s = 2 min
+  // dureeSecondes : 120 s (2 min) par défaut ; plus long pour les mails Canal+
+  // (voir le correctif du 05/11/2026 dans traiterAlerteSuggestionsStreamingV1_).
+  cache.put(cleCache, "1", dureeSecondes || 120);
   return false;
 }
 
@@ -1064,7 +1069,9 @@ function traiterAlerteSuggestionsStreamingV1_(corps) {
     // de connexion au service Feuilles de calcul" (erreur passagère de
     // Google, à un moment où d'autres déclencheurs tournaient) a fait
     // perdre le mail. Un nouvel essai quelques secondes plus tard suffit.
-    if (!dejaTraiteRecemment_("rapportCanalEcartsAuto")) {
+    // CORRECTIF (05/11/2026) -- deux scans Canal+ à 3 min d'écart envoyaient
+    // deux fois le même mail : anti-doublon porté de 2 à 10 minutes (Canal+).
+    if (!dejaTraiteRecemment_("rapportCanalEcartsAuto", DUREE_ANTI_DOUBLON_CANAL_SEC_)) {
       for (let essai = 1; essai <= 3; essai++) {
         try {
           genererEtEnvoyerRapportCanalEcartsV1();
@@ -1094,8 +1101,8 @@ function traiterAlerteSuggestionsStreamingV1_(corps) {
   // Voir dejaTraiteRecemment_ plus haut.
   const signature = "alerteSuggestionsStreaming_" + plateforme + "_" +
     fiches.concat(ambiguites).map(function(f) { return f.titre; }).join("|");
-  if (dejaTraiteRecemment_(signature)) {
-    journal_(plateforme + "_SUGGESTIONS", "ALERTE_MAIL", "IGNORE_DOUBLON_RECENT", "Requête identique déjà traitée dans les 2 dernières minutes");
+  if (dejaTraiteRecemment_(signature, plateforme === "CANAL+" ? DUREE_ANTI_DOUBLON_CANAL_SEC_ : undefined)) {
+    journal_(plateforme + "_SUGGESTIONS", "ALERTE_MAIL", "IGNORE_DOUBLON_RECENT", "Requête identique déjà traitée récemment");
     return reponseJsonWebhook_({ ok: true, mailEnvoye: false, doublonIgnore: true });
   }
 
