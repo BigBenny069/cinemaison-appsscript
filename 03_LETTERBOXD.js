@@ -430,7 +430,8 @@ function rechercherUrlLetterboxdAutomatique_(
   type
 ) {
   /**
-   * V4.5.7 (06/11/2026) : AUCUNE recherche automatique pour une Série.
+   * V4.5.7 (06/11/2026) : AUCUNE recherche automatique pour une Série
+   * (assouplie en V4.5.8 : redirection IMDb seulement, voir plus bas).
    * Letterboxd ne contient que des films : pour une série, la recherche
    * (IMDb, puis titre) retombait sur un film homonyme ou voisin et
    * écrivait sa note et ses votes à la place (constat du 06/11/2026 : sur
@@ -440,6 +441,20 @@ function rechercherUrlLetterboxdAutomatique_(
    * la main (chercherLetterboxd_, priorité 1) n'est pas concernée.
    */
   if (normalizeText_(type || "").indexOf("serie") !== -1) {
+    /**
+     * V4.5.8 (06/11/2026) : Letterboxd référence quand même certaines
+     * séries (Squid Game, Sharp Objects...). Pour une série, on garde
+     * donc UNIQUEMENT la redirection IMDb (fiable : l'identifiant IMDb
+     * désigne exactement la série, sinon Letterboxd répond "introuvable").
+     * Redirection TMDb et recherche par titre restent coupées : ce sont
+     * elles qui renvoyaient des films homonymes.
+     */
+    if (imdbId) {
+      const viaImdbSerie = rechercherLetterboxdViaImdb_(imdbId);
+      if (viaImdbSerie) {
+        return { url: viaImdbSerie, source: "IMDB_REDIRECT_SERIE" };
+      }
+    }
     return { url: "", source: "SERIE_NON_SUPPORTEE" };
   }
 
