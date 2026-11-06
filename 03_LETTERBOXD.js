@@ -3,7 +3,7 @@
  * CinéMaison V4
  * Script : 03_LETTERBOXD.gs
  * Rôle   : Recherche automatique et lecture Letterboxd
- * Version: 4.5.6
+ * Version: 4.5.7
  * Dépendances :
  *   - 00_CONFIG.gs
  *   - 01_UTILS.gs
@@ -115,6 +115,11 @@
  * (TMDbID différent) la possède déjà : la fiche reste "PAS DE LETTERBOXD"
  * (réessayée plus tard) et un mail d'alerte est envoyé (une seule fois
  * par couple URL/TMDb). Une URL saisie à la main n'est pas concernée.
+ *
+ * Correctif V4.5.7 (06/11/2026) : plus aucune recherche automatique pour
+ * une Série (voir rechercherUrlLetterboxdAutomatique_) -- Letterboxd ne
+ * gère que les films, la recherche par IMDb/titre trouvait un film sans
+ * rapport (57 séries sur 118 avec une mauvaise URL).
  * ============================================================
  */
 
@@ -424,6 +429,20 @@ function rechercherUrlLetterboxdAutomatique_(
   titreOriginal,
   type
 ) {
+  /**
+   * V4.5.7 (06/11/2026) : AUCUNE recherche automatique pour une Série.
+   * Letterboxd ne contient que des films : pour une série, la recherche
+   * (IMDb, puis titre) retombait sur un film homonyme ou voisin et
+   * écrivait sa note et ses votes à la place (constat du 06/11/2026 : sur
+   * 118 séries avec une URL, 57 pointaient vers un film sans rapport --
+   * ex. Les Soprano -> Stalker, The Walking Dead -> The Pursuit of
+   * Happyness). La fiche reste donc "PAS DE LETTERBOXD". Une URL saisie à
+   * la main (chercherLetterboxd_, priorité 1) n'est pas concernée.
+   */
+  if (normalizeText_(type || "").indexOf("serie") !== -1) {
+    return { url: "", source: "SERIE_NON_SUPPORTEE" };
+  }
+
   /**
    * Priorité 1 : redirection IMDb officielle de Letterboxd.
    *
