@@ -1108,6 +1108,12 @@ function traiterAlerteSuggestionsStreamingV1_(corps) {
 
   const destinataires = destinatairesPourService_("AjoutAutoPrime");
   if (destinataires) {
+    // 07/11/2026 : Disney+ -- l'image lue sur la page est souvent le logo-titre,
+    // pas l'affiche : on prend l'affiche TMDb (voir 36_AFFICHES_SUGGESTIONS.js).
+    if (plateforme === "DISNEY" && fiches.length > 0) {
+      try { affichesTmdbPourSuggestionsV1_(fiches); }
+      catch (err) { journal_("AFFICHES_SUGGESTIONS", "DISNEY", "ERREUR", String(err)); }
+    }
     const corpsHtml = construireHtmlSuggestionsPrimeV1_(fiches, ambiguites, plateforme);
     const sujet = fiches.length > 0 && ambiguites.length > 0
       ? "CinéMaison - V2 - " + fiches.length + " suggestion(s) + " + ambiguites.length + " ambiguïté(s) (" + plateforme + ")"
