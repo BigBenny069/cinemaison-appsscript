@@ -972,6 +972,7 @@ function traiterAlerteSuggestionsPrimeV1_(corps) {
  */
 function controleAQuelqueChoseAValiderV1_(resume) {
   return (Number(resume.changements) || 0) > 0 ||
+         (Number(resume.changementsStatut) || 0) > 0 ||
          (Number(resume.ajoutsPlateforme) || 0) > 0 ||
          (Number(resume.erreurs) || 0) > 0;
 }
@@ -1629,6 +1630,7 @@ function construireHtmlResumeControleStreamingV1_(plateforme, resume, confirmUrl
     ["Dates validées", resume.datesValidees],
     ["Sans alerte", resume.sansAlerte],
     ["Conflits d'autre source protégés", resume.conflitsProteges],
+    ["Changements de statut (Indispo / Inclus)", resume.changementsStatut || 0],
     ["Ajouts " + plateforme + " aux plateformes", resume.ajoutsPlateforme],
     ["Changements de date", resume.changements],
     ["Ignorés", resume.ignores],
@@ -1687,6 +1689,7 @@ function construireHtmlResumeControlePrimeV1_(resume, confirmUrl, plateforme) {
     ["Dates validées", resume.datesValidees],
     ["Sans alerte", resume.sansAlerte],
     ["Conflits d'autre source protégés", resume.conflitsProteges],
+    ["Changements de statut (Indispo / VOD...)", resume.changementsStatut || 0],
     ["Ajouts PRIME aux plateformes", resume.ajoutsPlateforme],
     ["Changements de date", resume.changements],
     ["Ignorés", resume.ignores],

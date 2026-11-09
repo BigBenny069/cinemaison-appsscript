@@ -332,6 +332,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
   let conflitsProteges = 0;
   let ajoutsPlateforme = 0;
   let changements = 0;
+  let changementsStatut = 0; // 09/11/2026 : Indispo/VOD/... à appliquer (compte pour le mail de validation)
 
   // Correctif V1.3 (13/09/2026) : collecte du détail par catégorie
   // (id/titre/durée/type/affiche), purement additif -- ne change rien
@@ -430,6 +431,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
     const nouveauStatutAcces = (hFilms.StatutAcces !== undefined)
       ? calculerNouveauStatutAccesV1_(film.valeurs[hFilms.StatutAcces], statutPrimeDetecte)
       : null;
+    if (nouveauStatutAcces) changementsStatut++;
     if (nouveauStatutAcces === null && hFilms.StatutAcces === undefined) {
       Logger.log(
         "  [StatutAcces] Colonne StatutAcces introuvable dans Films -- lance " +
@@ -769,6 +771,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
     conflitsProteges: conflitsProteges,
     ajoutsPlateforme: ajoutsPlateforme,
     changements: changements,
+    changementsStatut: changementsStatut,
     ignores: ignores,
     erreurs: erreurs,
     details: details,
