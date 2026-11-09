@@ -963,6 +963,20 @@ function traiterAlerteSuggestionsPrimeV1_(corps) {
 
 
 /**
+ * 09/11/2026 -- demandé par Ben : le mail "N contrôle(s) prêt(s) à appliquer"
+ * n'est plus envoyé quand il n'y a RIEN à valider (0 changement de date,
+ * 0 ajout de plateforme, 0 conflit protégé, 0 erreur). Le mail "RAS" reste
+ * la preuve que le contrôle est allé au bout. Dès qu'il y a quelque chose à
+ * regarder, le mail avec le bouton "Valider et appliquer" part comme avant.
+ */
+function controleAQuelqueChoseAValiderV1_(resume) {
+  return (Number(resume.changements) || 0) > 0 ||
+         (Number(resume.ajoutsPlateforme) || 0) > 0 ||
+         (Number(resume.conflitsProteges) || 0) > 0 ||
+         (Number(resume.erreurs) || 0) > 0;
+}
+
+/**
  * Reçoit { secret, action: "lancerVerificationControlePrime" } depuis
  * prime.js (appel direct au webhook, juste après un envoi réussi vers
  * CONTROLE_PRIME). Lance verifierResultatsPrimeOfficielSansEcriture()
@@ -985,7 +999,8 @@ function traiterLancerVerificationControlePrimeV1_(corps) {
   sauvegarderDernierDetailControleV1_("PRIME", resume.details);
 
   const destinataires = destinatairesPourService_("AjoutAutoPrime");
-  if (destinataires) {
+  const aValider = controleAQuelqueChoseAValiderV1_(resume);
+  if (destinataires && aValider) {
     // confirmUrl est construit par prime.js (qui a déjà le mot de passe
     // via secrets-local.json) et transmis tel quel -- pas de clé de
     // config à deviner côté Apps Script.
@@ -1000,12 +1015,12 @@ function traiterLancerVerificationControlePrimeV1_(corps) {
   journal_(
     "CONTROLE_PRIME",
     "VERIFICATION_AUTO",
-    destinataires ? "OK" : "IGNORE_SANS_DESTINATAIRE",
+    !destinataires ? "IGNORE_SANS_DESTINATAIRE" : (aValider ? "OK" : "OK_SANS_MAIL_RIEN_A_VALIDER"),
     "Valides=" + resume.controlesValides + " | Changements=" + resume.changements +
     " | AjoutsPlateforme=" + resume.ajoutsPlateforme + " | Erreurs=" + resume.erreurs
   );
 
-  return reponseJsonWebhook_({ ok: true, resume: resume, mailEnvoye: !!destinataires });
+  return reponseJsonWebhook_({ ok: true, resume: resume, mailEnvoye: !!destinataires && aValider, rienAValider: !aValider });
 }
 
 
@@ -1158,7 +1173,8 @@ function traiterLancerVerificationControleStreamingV1_(corps) {
   sauvegarderDernierDetailControleV1_(plateforme, resume.details);
 
   const destinataires = destinatairesPourService_("AjoutAutoPrime");
-  if (destinataires) {
+  const aValider = controleAQuelqueChoseAValiderV1_(resume);
+  if (destinataires && aValider) {
     const corpsHtml = construireHtmlResumeControleStreamingV1_(plateforme, resume, corps.confirmUrl);
     MailApp.sendEmail({
       to: destinataires,
@@ -1170,12 +1186,12 @@ function traiterLancerVerificationControleStreamingV1_(corps) {
   journal_(
     "CONTROLE_" + plateforme,
     "VERIFICATION_AUTO",
-    destinataires ? "OK" : "IGNORE_SANS_DESTINATAIRE",
+    !destinataires ? "IGNORE_SANS_DESTINATAIRE" : (aValider ? "OK" : "OK_SANS_MAIL_RIEN_A_VALIDER"),
     "Valides=" + resume.controlesValides + " | Changements=" + resume.changements +
     " | AjoutsPlateforme=" + resume.ajoutsPlateforme + " | Erreurs=" + resume.erreurs
   );
 
-  return reponseJsonWebhook_({ ok: true, resume: resume, mailEnvoye: !!destinataires });
+  return reponseJsonWebhook_({ ok: true, resume: resume, mailEnvoye: !!destinataires && aValider, rienAValider: !aValider });
 }
 
 /**
