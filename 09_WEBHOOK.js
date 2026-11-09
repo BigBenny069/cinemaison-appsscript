@@ -965,14 +965,14 @@ function traiterAlerteSuggestionsPrimeV1_(corps) {
 /**
  * 09/11/2026 -- demandé par Ben : le mail "N contrôle(s) prêt(s) à appliquer"
  * n'est plus envoyé quand il n'y a RIEN à valider (0 changement de date,
- * 0 ajout de plateforme, 0 conflit protégé, 0 erreur). Le mail "RAS" reste
+ * 0 ajout de plateforme, 0 erreur ; les conflits protégés ne changent rien à
+ * l'application, donc ils ne déclenchent pas le mail). Le mail "RAS" reste
  * la preuve que le contrôle est allé au bout. Dès qu'il y a quelque chose à
  * regarder, le mail avec le bouton "Valider et appliquer" part comme avant.
  */
 function controleAQuelqueChoseAValiderV1_(resume) {
   return (Number(resume.changements) || 0) > 0 ||
          (Number(resume.ajoutsPlateforme) || 0) > 0 ||
-         (Number(resume.conflitsProteges) || 0) > 0 ||
          (Number(resume.erreurs) || 0) > 0;
 }
 
