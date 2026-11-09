@@ -189,6 +189,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
   let conflitsProteges = 0;
   let ajoutsPlateforme = 0;
   let changements = 0;
+  let changementsStatut = 0; // 09/11/2026 : Indispo <-> Inclus (Paramount), à valider
 
   // Correctif V1.3 (13/09/2026) : voir note identique dans
   // 11_CONTROLE_PRIME_OFFICIEL.gs -- purement additif.
@@ -264,6 +265,23 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
     const plateformeAjoutee = plateformesApres !== plateformesAvant;
     if (plateformeAjoutee) ajoutsPlateforme++;
 
+    // 09/11/2026 (demandé par Ben, cas Breakdown/Paramount) : le collecteur
+    // peut signaler StatutDetecte = INDISPONIBLE (page du film introuvable).
+    // La fiche passe alors en StatutAcces "Indispo" (comme Prime) et repasse
+    // en "Inclus" quand le film revient. Rien d'autre n'est touché.
+    const statutDetecte = (hResultats.StatutDetecte !== undefined)
+      ? String(resultat[hResultats.StatutDetecte] || "").trim().toUpperCase()
+      : "";
+    const nouveauStatutAcces = (hFilms.StatutAcces !== undefined)
+      ? calculerNouveauStatutAccesStreamingV1_(film.valeurs[hFilms.StatutAcces], statutDetecte)
+      : null;
+    if (nouveauStatutAcces) changementsStatut++;
+    function ecrireStatutAccesStreaming_() {
+      if (!nouveauStatutAcces) return;
+      Logger.log("  [StatutAcces] " + idFilm + " : " + (film.valeurs[hFilms.StatutAcces] || "(vide)") + " -> " + nouveauStatutAcces);
+      ecrireChampStreamingV1_(films, film.ligne, hFilms, "StatutAcces", nouveauStatutAcces);
+    }
+
     if (statut === "AUCUNE_ALERTE") {
       sansAlerte++;
       details.sansAlerte.push(detailFiche_(film, idFilm));
@@ -276,6 +294,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
         if (plateformeAjoutee) {
           ecrireChampStreamingV1_(films, film.ligne, hFilms, "PlateformesDetectees", plateformesApres);
         }
+        ecrireStatutAccesStreaming_();
       }
       continue;
     }
@@ -328,6 +347,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
         if (plateformeAjoutee) {
           ecrireChampStreamingV1_(films, film.ligne, hFilms, "PlateformesDetectees", plateformesApres);
         }
+        ecrireStatutAccesStreaming_();
       }
       continue;
     }
@@ -366,6 +386,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
     if (plateformeAjoutee) {
       ecrireChampStreamingV1_(films, film.ligne, hFilms, "PlateformesDetectees", plateformesApres);
     }
+    ecrireStatutAccesStreaming_();
     ecrireChampStreamingV1_(
       films, film.ligne, hFilms, "CommentaireDisponibilite",
       config.libellePlateforme + " officiel : " + message +
@@ -382,6 +403,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
   Logger.log("Conflits d'autre source protégés : " + conflitsProteges);
   Logger.log("Ajouts " + config.libellePlateforme + " aux plateformes : " + ajoutsPlateforme);
   Logger.log("Changements de date : " + changements);
+  Logger.log("Changements de statut d'accès (Indispo/Inclus) : " + changementsStatut);
   Logger.log("Ignorés : " + ignores);
   Logger.log("Erreurs : " + erreurs);
   if (!ecrire) Logger.log("AUCUNE ÉCRITURE EFFECTUÉE");
@@ -396,10 +418,24 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
     conflitsProteges: conflitsProteges,
     ajoutsPlateforme: ajoutsPlateforme,
     changements: changements,
+    changementsStatut: changementsStatut,
     ignores: ignores,
     erreurs: erreurs,
     details: details,
   };
+}
+
+/**
+ * 09/11/2026 -- Indispo <-> Inclus pour les plateformes streaming (Paramount).
+ * INDISPONIBLE -> "Indispo" ; INCLUS -> "Inclus" SEULEMENT si la fiche était
+ * en "Indispo" (on ne touche jamais VOD / Bientôt disponible / etc.).
+ * Retourne null si rien ne doit changer.
+ */
+function calculerNouveauStatutAccesStreamingV1_(statutAccesActuel, statutDetecte) {
+  const actuel = String(statutAccesActuel || "").trim();
+  if (statutDetecte === "INDISPONIBLE") return actuel === "Indispo" ? null : "Indispo";
+  if (statutDetecte === "INCLUS" && actuel === "Indispo") return "Inclus";
+  return null;
 }
 
 function configPlateformeStreamingV1_(plateforme) {
