@@ -193,7 +193,7 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
 
   // Correctif V1.3 (13/09/2026) : voir note identique dans
   // 11_CONTROLE_PRIME_OFFICIEL.gs -- purement additif.
-  const details = { sansAlerte: [], conflitsProteges: [], datesValidees: [], ignores: [], erreurs: [] };
+  const details = { changementsStatut: [], ajoutsPlateformes: [], sansAlerte: [], conflitsProteges: [], datesValidees: [], ignores: [], erreurs: [] };
   function detailFiche_(f, id) {
     if (!f) return { id: id };
     return {
@@ -263,7 +263,10 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
     const plateformesAvant = String(film.valeurs[hFilms.PlateformesDetectees] || "").trim();
     const plateformesApres = ajouterPlateformeStreamingV1_(config, plateformesAvant);
     const plateformeAjoutee = plateformesApres !== plateformesAvant;
-    if (plateformeAjoutee) ajoutsPlateforme++;
+    if (plateformeAjoutee) {
+      ajoutsPlateforme++;
+      details.ajoutsPlateformes.push(Object.assign(detailFiche_(film, idFilm), { raison: config.libellePlateforme + " ajoutée à ses plateformes" }));
+    }
 
     // 09/11/2026 (demandé par Ben, cas Breakdown/Paramount) : le collecteur
     // peut signaler StatutDetecte = INDISPONIBLE (page du film introuvable).
@@ -275,7 +278,12 @@ function traiterResultatsStreamingOfficielV1_(plateforme, ecrire) {
     const nouveauStatutAcces = (hFilms.StatutAcces !== undefined)
       ? calculerNouveauStatutAccesStreamingV1_(film.valeurs[hFilms.StatutAcces], statutDetecte)
       : null;
-    if (nouveauStatutAcces) changementsStatut++;
+    if (nouveauStatutAcces) {
+      changementsStatut++;
+      details.changementsStatut.push(Object.assign(detailFiche_(film, idFilm), {
+        raison: "statut : " + (String(film.valeurs[hFilms.StatutAcces] || "").trim() || "(vide)") + " &rarr; <span style=\"font-weight:bold\">" + nouveauStatutAcces + "</span>",
+      }));
+    }
     function ecrireStatutAccesStreaming_() {
       if (!nouveauStatutAcces) return;
       Logger.log("  [StatutAcces] " + idFilm + " : " + (film.valeurs[hFilms.StatutAcces] || "(vide)") + " -> " + nouveauStatutAcces);

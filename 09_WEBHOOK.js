@@ -588,7 +588,7 @@ function sauvegarderDernierDetailControleV1_(plateforme, details) {
   }
 
   const nouvellesLignes = [];
-  ["sansAlerte", "conflitsProteges", "datesValidees", "ignores", "erreurs"].forEach(function (categorie) {
+  ["changementsStatut", "ajoutsPlateformes", "sansAlerte", "conflitsProteges", "datesValidees", "ignores", "erreurs"].forEach(function (categorie) {
     (details[categorie] || []).forEach(function (f) {
       nouvellesLignes.push([plateforme, categorie, JSON.stringify(f), maintenant]);
     });
@@ -610,6 +610,8 @@ function construireLienDetailControleV1_(plateforme) {
 }
 
 const LIBELLES_CATEGORIES_DETAIL_V1 = {
+  changementsStatut: "Changements de statut (Indispo / VOD...)",
+  ajoutsPlateformes: "Ajouts de plateforme",
   datesValidees: "Dates validées",
   sansAlerte: "Sans alerte",
   conflitsProteges: "Conflits d'autre source protégés",
@@ -625,7 +627,7 @@ const LIBELLES_CATEGORIES_DETAIL_V1 = {
 function construirePageDetailControleV1_(plateforme) {
   const classeur = SpreadsheetApp.getActiveSpreadsheet();
   const feuille = classeur.getSheetByName("DERNIER_DETAIL_CONTROLE");
-  const parCategorie = { datesValidees: [], sansAlerte: [], conflitsProteges: [], ignores: [], erreurs: [] };
+  const parCategorie = { changementsStatut: [], ajoutsPlateformes: [], datesValidees: [], sansAlerte: [], conflitsProteges: [], ignores: [], erreurs: [] };
 
   if (feuille && feuille.getLastRow() >= 2) {
     const donnees = feuille.getRange(2, 1, feuille.getLastRow() - 1, 4).getValues();
