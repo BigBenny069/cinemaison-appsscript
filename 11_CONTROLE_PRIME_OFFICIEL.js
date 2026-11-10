@@ -338,7 +338,7 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
   // (id/titre/durée/type/affiche), purement additif -- ne change rien
   // à la logique de validation ci-dessus, sert uniquement à alimenter
   // la page "Voir le détail" du mail (voir 09_WEBHOOK.gs).
-  const details = { sansAlerte: [], conflitsProteges: [], datesValidees: [], ignores: [], erreurs: [] };
+  const details = { changementsStatut: [], ajoutsPlateformes: [], sansAlerte: [], conflitsProteges: [], datesValidees: [], ignores: [], erreurs: [] };
   function detailFiche_(f, id) {
     if (!f) return { id: id };
     return {
@@ -431,7 +431,12 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
     const nouveauStatutAcces = (hFilms.StatutAcces !== undefined)
       ? calculerNouveauStatutAccesV1_(film.valeurs[hFilms.StatutAcces], statutPrimeDetecte)
       : null;
-    if (nouveauStatutAcces) changementsStatut++;
+    if (nouveauStatutAcces) {
+      changementsStatut++;
+      details.changementsStatut.push(Object.assign(detailFiche_(film, idFilm), {
+        raison: "statut : " + (String(film.valeurs[hFilms.StatutAcces] || "").trim() || "(vide)") + " &rarr; <span style=\"font-weight:bold\">" + nouveauStatutAcces + "</span>",
+      }));
+    }
     if (nouveauStatutAcces === null && hFilms.StatutAcces === undefined) {
       Logger.log(
         "  [StatutAcces] Colonne StatutAcces introuvable dans Films -- lance " +
@@ -486,7 +491,10 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
     ).trim();
     const plateformesApres = ajouterPlateformePrimeV110_(plateformesAvant);
     const plateformeAjoutee = plateformesApres !== plateformesAvant;
-    if (plateformeAjoutee) ajoutsPlateforme++;
+    if (plateformeAjoutee) {
+      ajoutsPlateforme++;
+      details.ajoutsPlateformes.push(Object.assign(detailFiche_(film, idFilm), { raison: "PRIME ajoutée à ses plateformes" }));
+    }
 
 
     if (statut === "AUCUNE_ALERTE") {
