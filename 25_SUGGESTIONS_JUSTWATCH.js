@@ -332,7 +332,7 @@ function suggestionsLireRetoursV1_() {
     const verdict = String(get_(valeurs[i], h, "Verdict") || "").trim().toUpperCase();
     if (!cle) continue;
     const genres = suggestionsDecouperGenresV1_(get_(valeurs[i], h, "Genres"));
-    if (verdict === "PAS_INTERESSE") retours.ignores[cle] = true;
+    if (verdict === "PAS_INTERESSE" || verdict === "DEJA_VU") retours.ignores[cle] = true; // DEJA_VU : l'avis est lu dans l'onglet AVIS
     if (verdict === "N_AIME_PAS") { retours.ignores[cle] = true; retours.aimePas.push(genres); }
     if (verdict === "AJOUTE") retours.ajoutes[cle] = genres;
   }
@@ -952,7 +952,7 @@ function suggestionsCarteHtmlV2_(t, base, secret) {
     "<br><span style=\"color:#888;font-size:12px\">" + suggestionsEchapperV1_(t.genres.join(" / ")) + "</span>" +
     "<br><span style=\"color:#2a7;font-size:12px\">" + suggestionsEchapperV1_(t.raison) + "</span>" +
     "<br>" + suggestionsEchapperV1_(suggestionsCouperV2_(t.synopsis, 120)) +
-    "<br>" + bouton("Ajouter", "AJ", "#1a7f37") + bouton("Pas intéressé", "PI", "#666666") + bouton("N'aime pas", "NA", "#b3261e") +
+    "<br>" + bouton("Ajouter", "AJ", "#1a7f37") + bouton("Déjà vu", "DV", "#9a6b00") + bouton("Pas intéressé", "PI", "#666666") + bouton("N'aime pas", "NA", "#b3261e") +
     (t.url ? "<a href=\"" + suggestionsLienBrutV2_(t.url) + "\" style=\"display:inline-block;margin-top:6px;font-size:12px;color:#0b57d0\">Voir sur " + suggestionsEchapperV1_(t.plateforme) + "</a>" : "") +
     "</td></tr></table>";
 }
