@@ -1758,7 +1758,12 @@ function construireHtmlSuggestionsPrimeV1_(fiches, ambiguites, plateforme) {
   let lignes = "";
   fiches.forEach(function(f) {
     const titreAffiche = escaperHtmlDigestV1_(f.titre) +
-      (f.annee ? ' <span style="font-weight:normal;color:#9A9182">(' + f.annee + ')</span>' : '');
+      (f.annee ? ' <span style="font-weight:normal;color:#9A9182">(' + f.annee + ')</span>' : '') +
+      // NOUVEAU (12/11/2026) -- 2e page de la plateforme pour un film déjà suivi, durée différente.
+      (f.versionSupplementaire
+        ? '<br><span style="font-weight:normal;color:#B5622B;font-size:12px">Autre version d\'un film déjà dans CinéMaison' +
+          (f.dureeVersion ? ' (durée ' + escaperHtmlDigestV1_(f.dureeVersion) + ')' : '') + '</span>'
+        : '');
 
     const boutonAjout = f.confirmUrl
       ? '<a href="' + f.confirmUrl + '" style="display:inline-block;margin-top:8px;background:#B5622B;' +
