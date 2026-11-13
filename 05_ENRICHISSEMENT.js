@@ -1470,14 +1470,25 @@ function ecrireResultatTmdbV4_(
     { force: forcerReecriture }
   );
 
-  setProtected_(
-    sheet,
-    rowNumber,
-    h,
-    "Duree",
-    tmdb.duree,
-    { force: forcerReecriture }
-  );
+  // CORRECTIF (13/11/2026) -- une durée déjà présente n'est JAMAIS remplacée par
+  // celle de TMDb, sauf réécriture forcée (révision / changement d'identité).
+  // Cas : deux versions d'un même film sur une plateforme (Blade Runner 1h51 /
+  // 1h57) -- la fiche "version supplémentaire" est créée avec la durée de la
+  // plateforme, et l'enrichissement la remplaçait par celle de TMDb (1h57),
+  // recréant l'ambiguïté. Ne dépend plus du réglage de protection de la colonne.
+  const dureeActuelle = h["Duree"] !== undefined
+    ? sheet.getRange(rowNumber, h["Duree"] + 1).getValue()
+    : "";
+  if (forcerReecriture || isBlank_(dureeActuelle)) {
+    setProtected_(
+      sheet,
+      rowNumber,
+      h,
+      "Duree",
+      tmdb.duree,
+      { force: forcerReecriture }
+    );
+  }
 
   setProtected_(
     sheet,
