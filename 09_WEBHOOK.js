@@ -610,6 +610,10 @@ function construireLienDetailControleV1_(plateforme) {
 }
 
 const LIBELLES_CATEGORIES_DETAIL_V1 = {
+  // NOUVEAU (15/11/2026) -- rubrique dédiée, demandée par Ben : les fiches
+  // dont la date a changé, avec "ancienne -> nouvelle". Calculée à partir de
+  // datesValidees (champ "changee") -- voir construirePageDetailControleV1_.
+  changementsDate: "Changements de date",
   changementsStatut: "Changements de statut (Indispo / VOD...)",
   ajoutsPlateformes: "Ajouts de plateforme",
   datesValidees: "Dates validées",
@@ -627,7 +631,7 @@ const LIBELLES_CATEGORIES_DETAIL_V1 = {
 function construirePageDetailControleV1_(plateforme) {
   const classeur = SpreadsheetApp.getActiveSpreadsheet();
   const feuille = classeur.getSheetByName("DERNIER_DETAIL_CONTROLE");
-  const parCategorie = { changementsStatut: [], ajoutsPlateformes: [], datesValidees: [], sansAlerte: [], conflitsProteges: [], ignores: [], erreurs: [] };
+  const parCategorie = { changementsDate: [], changementsStatut: [], ajoutsPlateformes: [], datesValidees: [], sansAlerte: [], conflitsProteges: [], ignores: [], erreurs: [] };
 
   if (feuille && feuille.getLastRow() >= 2) {
     const donnees = feuille.getRange(2, 1, feuille.getLastRow() - 1, 4).getValues();
@@ -642,6 +646,11 @@ function construirePageDetailControleV1_(plateforme) {
       }
     });
   }
+
+  // NOUVEAU (15/11/2026) -- les fiches de "Dates validées" dont la date a
+  // changé sont aussi regroupées dans une rubrique à part (elles restent
+  // dans "Dates validées" pour que le total corresponde au résumé du mail).
+  parCategorie.changementsDate = parCategorie.datesValidees.filter(function (f) { return f && f.changee; });
 
   const sections = Object.keys(LIBELLES_CATEGORIES_DETAIL_V1).map(function (categorie) {
     const fiches = parCategorie[categorie];
@@ -667,7 +676,13 @@ function construirePageDetailControleV1_(plateforme) {
             "part le " + f.dateRetraitAvant + ' &rarr; <span style="font-weight:bold">' + f.dateRetrait + "</span>"
           );
         } else {
-          sousLignes.push("part le " + f.dateRetrait + (f.changee ? " (changement)" : ""));
+          // MODIFIÉ (15/11/2026) -- sans ancienne date (première date posée
+          // sur la fiche), dit-le clairement au lieu d'un "(changement)" muet.
+          sousLignes.push(
+            f.changee
+              ? 'part le <span style="color:#9A9182">vide</span> &rarr; <span style="font-weight:bold">' + f.dateRetrait + "</span>"
+              : "part le " + f.dateRetrait
+          );
         }
       }
       if (f.raison) sousLignes.push(f.raison);
