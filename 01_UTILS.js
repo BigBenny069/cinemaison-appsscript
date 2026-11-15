@@ -203,6 +203,18 @@ function setProtected_(sheet, rowNumber, h, columnName, value, options) {
 
 
   avecReessaiSheets_(() => cell.setValue(value));
+
+  // NOUVEAU (15/11/2026) -- une URL Letterboxd écrite plus tôt laisse à la
+  // cellule le style "lien" (bleu souligné) de Google Sheets. Quand on la
+  // remplace ensuite par « PAS DE LETTERBOXD » (texte, pas un lien), on retire
+  // ce style : sinon la cellule ressemble à un lien alors qu'elle n'en est pas un.
+  if (columnName === "URLLetterboxd" && !/^https?:\/\//i.test(String(value || "").trim())) {
+    try {
+      avecReessaiSheets_(() => cell.setFontLine("none").setFontColor(null));
+    } catch (e) {
+      // purement visuel -- jamais bloquant
+    }
+  }
   return true;
 }
 
