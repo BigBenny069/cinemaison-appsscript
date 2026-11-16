@@ -134,6 +134,7 @@ function calculerDoublonsFilmsV1_() {
   const colAnnee = entetes.indexOf("Annee");
   const colPlateforme = entetes.indexOf("Plateforme");
   const colAffiche = entetes.indexOf("Affiche");
+  const colDuree = entetes.indexOf("Duree");
   if (colID === -1 || colTitre === -1 || colAnnee === -1 || colPlateforme === -1) {
     throw new Error("Colonne ID, Titre, Annee ou Plateforme introuvable dans Films.");
   }
@@ -154,6 +155,7 @@ function calculerDoublonsFilmsV1_() {
       annee: annee,
       plateforme: String(donnees[i][colPlateforme] || "").trim(),
       affiche: colAffiche !== -1 ? String(donnees[i][colAffiche] || "") : "",
+      dureeMinutes: colDuree !== -1 ? dureeEnMinutesDoublonsV1_(donnees[i][colDuree]) : null,
     });
   }
 
@@ -192,9 +194,15 @@ function calculerDoublonsFilmsV1_() {
     });
 
     Object.keys(parPlateforme).forEach(function(plateforme) {
-      if (parPlateforme[plateforme].length >= 2) {
-        memePlateforme.push(parPlateforme[plateforme]);
-      }
+      // NOUVEAU (16/11/2026) -- deux fiches de la même plateforme dont la
+      // durée diffère d'au moins 3 min sont deux VERSIONS du film (ex. Blade
+      // Runner Prime 1h51 / 1h57), pas un doublon : même règle que
+      // "version supplémentaire" des collecteurs. On ne garde que les fiches
+      // qu'on ne peut pas distinguer par la durée (écart < 3 min, ou durée
+      // absente sur l'une des deux).
+      regrouperSansVersionsDoublonsV1_(parPlateforme[plateforme]).forEach(function(g) {
+        memePlateforme.push(g);
+      });
     });
 
     const plateformesUniques = Object.keys(parPlateforme);
@@ -204,6 +212,40 @@ function calculerDoublonsFilmsV1_() {
   });
 
   return { memePlateforme: memePlateforme, plateformesDifferentes: plateformesDifferentes };
+}
+
+// NOUVEAU (16/11/2026) -- "1h57", "117 min", "1 h 57", 117 -> minutes ; null si illisible.
+function dureeEnMinutesDoublonsV1_(valeur) {
+  if (valeur === null || valeur === undefined || valeur === "") return null;
+  if (typeof valeur === "number") return valeur > 0 ? Math.round(valeur) : null;
+  const t = String(valeur).trim().toLowerCase();
+  let m = t.match(/^(\d+)\s*h\s*(\d{1,2})?/);
+  if (m) return parseInt(m[1], 10) * 60 + (m[2] ? parseInt(m[2], 10) : 0);
+  m = t.match(/^(\d+)\s*(min|mn|m)?$/);
+  if (m) return parseInt(m[1], 10);
+  return null;
+}
+
+// NOUVEAU (16/11/2026) -- regroupe les fiches qu'aucune différence de durée
+// (>= 3 min des deux côtés) ne sépare ; ne renvoie que les groupes de 2+ fiches.
+function regrouperSansVersionsDoublonsV1_(membres) {
+  const SEUIL_VERSION_MIN = 3;
+  const parent = membres.map(function(_, i) { return i; });
+  function racine(i) { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; }
+  for (let a = 0; a < membres.length; a++) {
+    for (let b = a + 1; b < membres.length; b++) {
+      const da = membres[a].dureeMinutes, db = membres[b].dureeMinutes;
+      const versionsDistinctes = da && db && Math.abs(da - db) >= SEUIL_VERSION_MIN;
+      if (!versionsDistinctes) parent[racine(a)] = racine(b);
+    }
+  }
+  const groupes = {};
+  membres.forEach(function(m, i) {
+    const r = racine(i);
+    if (!groupes[r]) groupes[r] = [];
+    groupes[r].push(m);
+  });
+  return Object.keys(groupes).map(function(k) { return groupes[k]; }).filter(function(g) { return g.length >= 2; });
 }
 
 function detecterDoublonsFilmsV1() {
