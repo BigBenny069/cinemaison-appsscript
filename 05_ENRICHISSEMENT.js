@@ -1932,13 +1932,16 @@ function tailleLotEnrichissementInitialV457_(stock) {
 
 
 function determinerModeEnrichissementInitialV457_() {
-  const sheet = getSheet_(SHEETS.FILMS);
+  // MODIFIÉ (18/11/2026) -- "Service Spreadsheets failed" (raté passager de
+  // Google, mail d'erreur reçu le 18/11 à 16:00) : l'ouverture et la lecture du
+  // Sheet sont maintenant réessayées automatiquement, comme ailleurs.
+  const sheet = avecReessaiSheets_(function () { return getSheet_(SHEETS.FILMS); });
 
   if (!sheet) {
     throw new Error("Feuille Films introuvable.");
   }
 
-  const data = sheet.getDataRange().getValues();
+  const data = avecReessaiSheets_(function () { return sheet.getDataRange().getValues(); });
   const h = data.length > 0 ? headers_(data[0]) : {};
   const stock =
     data.length > 1

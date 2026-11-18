@@ -34,7 +34,11 @@
  */
 
 const CLE_CURSEUR_LETTERBOXD_V1 = "curseurRafraichissementLetterboxdV1";
-const BUDGET_TEMPS_LETTERBOXD_MS = 5 * 60 * 1000; // 5 min -- marge sous la limite de 6 min d'Apps Script
+// MODIFIÉ (18/11/2026) -- 5 min ne laissait pas assez de marge : le lundi 16/11 à
+// 2h52 l'exécution a dépassé les 6 min d'Apps Script ("Exceeded maximum
+// execution time", curseur jamais enregistré, relance jamais programmée). Une
+// seule page Letterboxd lente peut durer plus d'une minute : on s'arrête à 3 min.
+const BUDGET_TEMPS_LETTERBOXD_MS = 3 * 60 * 1000;
 const DELAI_RELANCE_LETTERBOXD_MS = 30 * 1000; // reprise ~30s après la fin du lot précédent
 
 /** Lance une seule fois depuis l'éditeur pour activer le rafraîchissement hebdomadaire. */
@@ -141,6 +145,11 @@ function traiterLotLetterboxdV1_() {
     }
 
     traitees++;
+
+    // NOUVEAU (18/11/2026) -- le curseur est enregistré après CHAQUE fiche
+    // traitée : si l'exécution est tuée par Google, la reprise repart d'ici et
+    // non du début.
+    PropertiesService.getScriptProperties().setProperty(CLE_CURSEUR_LETTERBOXD_V1, String(curseur + 1));
   }
 
   PropertiesService.getScriptProperties().setProperty(CLE_CURSEUR_LETTERBOXD_V1, String(curseur));
