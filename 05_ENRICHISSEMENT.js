@@ -696,6 +696,24 @@ function revisionFichesIncompletes() {
 
 
 
+/**
+ * NOUVEAU (20/11/2026) -- LockService.tryLock peut lever une erreur passagère
+ * côté Google ("We're sorry, a server error occurred"), ce qui envoyait un mail
+ * d'erreur pour rien. On réessaie 3 fois (pause 5 s) avant de laisser remonter.
+ */
+function tryLockAvecReessaiV1_(lock, delaiMs) {
+  const TENTATIVES = 3;
+  for (let i = 1; i <= TENTATIVES; i++) {
+    try {
+      return lock.tryLock(delaiMs);
+    } catch (err) {
+      if (i === TENTATIVES) throw err;
+      Utilities.sleep(5000);
+    }
+  }
+  return false;
+}
+
 function enrichirFilmsV4_(
   maxFilms,
   modeRevision,
@@ -705,7 +723,7 @@ function enrichirFilmsV4_(
   const lock =
     LockService.getScriptLock();
 
-  if (!lock.tryLock(30000)) {
+  if (!tryLockAvecReessaiV1_(lock, 30000)) {
     journal_(
       "ENRICHISSEMENT",
       "LOCK",
@@ -1479,7 +1497,13 @@ function ecrireResultatTmdbV4_(
   const dureeActuelle = h["Duree"] !== undefined
     ? sheet.getRange(rowNumber, h["Duree"] + 1).getValue()
     : "";
-  if (forcerReecriture || isBlank_(dureeActuelle)) {
+  // CORRECTIF (20/11/2026) -- la relance depuis l'app ("Redemander une
+  // vérification") force la réécriture et écrasait la durée (Blade Runner
+  // FILM1499 : 1h51 -> 1h57, ambiguïté revenue). Une durée déjà présente n'est
+  // maintenant JAMAIS remplacée, même en réécriture forcée. Pour la rafraîchir
+  // depuis TMDb : vider la cellule Duree puis relancer.
+  const dureeEstVide = isBlank_(dureeActuelle);
+  if (dureeEstVide) {
     setProtected_(
       sheet,
       rowNumber,
@@ -1499,12 +1523,14 @@ function ecrireResultatTmdbV4_(
     { force: forcerReecriture }
   );
 
+  // DureeMinutes suit la durée réellement conservée dans la colonne Duree.
+  const dureeConservee = dureeEstVide ? null : dureeEnMinutesDoublonsV1_(dureeActuelle);
   setProtected_(
     sheet,
     rowNumber,
     h,
     "DureeMinutes",
-    tmdb.dureeMinutes,
+    dureeConservee || tmdb.dureeMinutes,
     { force: true }
   );
 
