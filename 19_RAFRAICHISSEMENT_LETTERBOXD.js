@@ -77,6 +77,11 @@ function demarrerRafraichissementLetterboxdHebdoV1() {
  */
 function traiterLotLetterboxdV1_() {
   const debut = Date.now();
+  // 23/11/2026 : chaque lot laissait derrière lui son déclencheur déjà utilisé (« Désactivé »)
+  // jusqu'à la toute fin du catalogue -> 8 déclencheurs morts, limite de 20 atteinte et
+  // contrôle Canal+ bloqué. On efface donc les déclencheurs de continuation dès le début
+  // du lot ; le lot en reprogramme un neuf s'il reste des fiches.
+  supprimerDeclencheursContinuationLetterboxdV1_();
   const classeur = SpreadsheetApp.getActiveSpreadsheet();
   const feuille = classeur.getSheetByName("Films");
   if (!feuille) {

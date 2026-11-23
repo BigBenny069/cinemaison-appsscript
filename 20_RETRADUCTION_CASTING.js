@@ -102,6 +102,9 @@ function demarrerRetraductionCastingV1() {
  */
 function traiterLotRetraductionCastingV1_() {
   const debut = Date.now();
+  // 23/11/2026 : même correctif que le rafraîchissement Letterboxd (déclencheurs déjà utilisés
+  // qui s'accumulaient jusqu'à la fin du traitement).
+  supprimerDeclencheursContinuationRetraductionV1_();
   const classeur = SpreadsheetApp.getActiveSpreadsheet();
   const feuille = classeur.getSheetByName("Films");
   if (!feuille) return;
