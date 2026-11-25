@@ -676,18 +676,21 @@ function construirePageDetailControleV1_(plateforme) {
       // Canal+ (construireFicheModificationCanalV1_,
       // 06_CONNECTEURS_PLATEFORMES.gs). "(changement)" ne disait
       // jusqu'ici jamais vers quoi. Demandé par Ben pour Prime/Netflix.
+      // 25/11/2026 : "arrive le" pour une date d'arrivée (Prime "Bientôt
+      // disponible", champ arrivee posé par 11_CONTROLE_PRIME_OFFICIEL.js).
+      const verbeDate = f.arrivee ? "arrive le " : "part le ";
       if (f.dateRetrait) {
         if (f.changee && f.dateRetraitAvant) {
           sousLignes.push(
-            "part le " + f.dateRetraitAvant + ' &rarr; <span style="font-weight:bold">' + f.dateRetrait + "</span>"
+            verbeDate + f.dateRetraitAvant + ' &rarr; <span style="font-weight:bold">' + f.dateRetrait + "</span>"
           );
         } else {
           // MODIFIÉ (15/11/2026) -- sans ancienne date (première date posée
           // sur la fiche), dit-le clairement au lieu d'un "(changement)" muet.
           sousLignes.push(
             f.changee
-              ? 'part le <span style="color:#9A9182">vide</span> &rarr; <span style="font-weight:bold">' + f.dateRetrait + "</span>"
-              : "part le " + f.dateRetrait
+              ? verbeDate + '<span style="color:#9A9182">vide</span> &rarr; <span style="font-weight:bold">' + f.dateRetrait + "</span>"
+              : verbeDate + f.dateRetrait
           );
         }
       }
