@@ -598,6 +598,9 @@ function traiterResultatsPrimeOfficielV110_(ecrire) {
       if (dateArriveeChangee) changements++;
       details.datesValidees.push(Object.assign(detailFiche_(film, idFilm), {
         dateRetrait: formaterDatePrimeV110_(dateArrivee),
+        // NOUVEAU (25/11/2026) -- c'est une date d'ARRIVÉE (film "Bientôt
+        // disponible") : le détail du mail écrit "arrive le" au lieu de "part le".
+        arrivee: true,
         changee: dateArriveeChangee,
         // NOUVEAU (30/09/2026) -- voir 17_CONTROLE_STREAMING_GENERIQUE.js,
         // même correctif : l'ancienne date, déjà lue juste au-dessus,
