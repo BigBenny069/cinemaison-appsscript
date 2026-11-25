@@ -435,8 +435,32 @@ function translittererNomV1_(nom, cleDeepL) {
   }
 }
 
+/**
+ * NOUVEAU (25/11/2026) -- FILM1543 : l'enrichissement demande le film à TMDb en
+ * français, et TMDb renvoie alors certains noms en écriture native (« 藤井道人 »),
+ * alors que la fiche de la personne, lue SANS langue, donne « Michihito Fujii ».
+ * Premier recours : lire cette fiche sans langue. null si rien d'utilisable
+ * (erreur réseau, nom toujours non latin) -- la suite de la chaîne reprend.
+ */
+function nomLatinSansLangueTMDb_(personId, apiKey) {
+  try {
+    const res = fetchTMDbAvecRetry_(
+      "https://api.themoviedb.org/3/person/" + encodeURIComponent(personId) +
+        "?api_key=" + encodeURIComponent(apiKey),
+      "nom latin personne " + personId
+    );
+    if (res.getResponseCode() !== 200) return null;
+    const nom = String(parserJsonTMDb_(res.getContentText(), "nom latin personne " + personId).name || "").trim();
+    return nom && !contientEcritureNonLatine_(nom) ? nom : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 function nomLisibleTMDb_(personne, apiKey) {
   if (!contientEcritureNonLatine_(personne.name)) return personne.name;
+  const nomSansLangue = nomLatinSansLangueTMDb_(personne.id, apiKey);
+  if (nomSansLangue) return nomSansLangue;
   const alias = trouverAliasLatinTMDb_(personne.id, apiKey);
   if (alias) return alias;
   const translitteration = translittererNomV1_(personne.name, lireConfig_("DeepLApiKey", ""));
