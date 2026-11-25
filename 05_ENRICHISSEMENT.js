@@ -1080,6 +1080,28 @@ function tmdbIdDepuisLetterboxdV1_(urlLetterboxd, typeAttendu) {
     }
   }
 
+  // 25/11/2026 -- lien Letterboxd « normal » (/film/...) : la page contient le
+  // lien « TMDB » (themoviedb.org/movie/ID). On le lit pour ne pas chercher par
+  // titre, qui peut tomber sur un homonyme de la même année (cas « Faceless »,
+  // FILM1543 : un court métrage de 9 min pris à la place du film de Fujii).
+  // Si la page n'est pas lisible (Letterboxd bloque parfois Apps Script) ou si le
+  // type ne correspond pas (film/série), on rend "" : la recherche par titre
+  // reprend comme avant.
+  if (/letterboxd\.com\/film\//i.test(url)) {
+    try {
+      const reponse = fetchLetterboxdResponse_(url, true);
+      if (reponse && reponse.getResponseCode() === 200) {
+        const m = reponse.getContentText().match(/themoviedb\.org\/(movie|tv)\/(\d+)/i);
+        if (m) {
+          const attendu = String(typeAttendu || "") === "Série" ? "tv" : "movie";
+          if (m[1].toLowerCase() === attendu) return m[2];
+        }
+      }
+    } catch (e) {
+      Logger.log("Lecture de l'ID TMDb sur la page Letterboxd échouée : " + e.message);
+    }
+  }
+
   return "";
 }
 
