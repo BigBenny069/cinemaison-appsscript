@@ -448,6 +448,12 @@ function doPost(e) {
       return traiterRapportCanalEcartsV1_(corps);
     }
 
+    // NOUVEAU (25/11/2026) -- mail "CANAL+ favoris" envoyé par canal.js
+    // (--favoris), voir 37_CANAL_FAVORIS.js.
+    if (corps.action === "alerteFavorisCanal") {
+      return traiterAlerteFavorisCanalV1_(corps);
+    }
+
     // NOUVEAU (11/10/2026) -- actions CANAL+ lançables depuis l'application
     // (Réglages > CONTRÔLE CANAL+), voir 22_ACTIONS_CANAL_APP.js.
     if (["canalRecontrolerAVerifier", "canalControleComplet", "canalEtatControle", "canalArreterControle", "canalReclasserVod", "primeNettoyageApercu", "primeNettoyageAppliquer"].indexOf(corps.action) !== -1) {
