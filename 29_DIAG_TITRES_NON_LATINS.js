@@ -110,3 +110,65 @@ function appliquerTitresNonLatinsV1() {
   });
   Logger.log("Terminé : " + changes + " titre(s) remplacé(s), " + ignores + " ignoré(s) (pas de titre latin proposé).");
 }
+
+
+/**
+ * DIAGNOSTIC (25/11/2026) -- LECTURE SEULE, ne modifie aucune fiche.
+ * Cas FILM1543 : le réalisateur est resté « 藤井道人 » au lieu d'un nom en
+ * lettres latines. Cette fonction montre, pour le(s) réalisateur(s) d'un film
+ * TMDb, ce que répondent chacune des 3 étapes de nomLisibleTMDb_ :
+ *   1) les autres noms (also_known_as) de la personne chez TMDb,
+ *   2) la clé DeepL (présente ou non -- jamais affichée) et la réponse de DeepL,
+ *   3) le nom final que le script retiendrait.
+ * Usage : lancer diagnosticNomLatinV1() depuis l'éditeur Apps Script, puis
+ * ouvrir « Journal d'exécution ». Par défaut : film TMDb 1356890.
+ */
+function diagnosticNomLatinV1(tmdbIdFilm) {
+  const idFilm = String(tmdbIdFilm || "1356890");
+  const apiKey = lireConfig_("TMDbApiKey", "");
+  if (!apiKey) { Logger.log("TMDbApiKey absente de CONFIG."); return; }
+
+  const resFilm = fetchTMDbAvecRetry_(
+    "https://api.themoviedb.org/3/movie/" + encodeURIComponent(idFilm) + "/credits?api_key=" + encodeURIComponent(apiKey),
+    "diagnostic crédits " + idFilm
+  );
+  Logger.log("Crédits du film " + idFilm + " : HTTP " + resFilm.getResponseCode());
+  if (resFilm.getResponseCode() !== 200) return;
+  const realisateurs = (JSON.parse(resFilm.getContentText()).crew || []).filter(function (p) { return p.job === "Director"; });
+  if (!realisateurs.length) { Logger.log("Aucun réalisateur dans les crédits TMDb."); return; }
+
+  const cleDeepL = lireConfig_("DeepLApiKey", "");
+  Logger.log("Clé DeepL dans CONFIG : " + (cleDeepL ? "PRÉSENTE (" + (/:fx$/.test(cleDeepL) ? "offre gratuite" : "offre payante") + ")" : "ABSENTE"));
+
+  realisateurs.forEach(function (p) {
+    Logger.log("--- Réalisateur : " + p.name + " (personne TMDb " + p.id + ")");
+    Logger.log("Écriture non latine : " + contientEcritureNonLatine_(p.name));
+
+    const resPers = fetchTMDbAvecRetry_(
+      "https://api.themoviedb.org/3/person/" + encodeURIComponent(p.id) + "?api_key=" + encodeURIComponent(apiKey),
+      "diagnostic personne " + p.id
+    );
+    const alias = resPers.getResponseCode() === 200 ? (JSON.parse(resPers.getContentText()).also_known_as || []) : [];
+    Logger.log("Étape 1 -- autres noms TMDb (" + alias.length + ") : " + JSON.stringify(alias));
+    Logger.log("Étape 1 -- premier nom en lettres latines : " + (trouverAliasLatinTMDb_(p.id, apiKey) || "AUCUN"));
+
+    if (cleDeepL) {
+      try {
+        const hote = /:fx$/.test(cleDeepL) ? "api-free.deepl.com" : "api.deepl.com";
+        const res = UrlFetchApp.fetch("https://" + hote + "/v2/translate", {
+          method: "post",
+          contentType: "application/json",
+          headers: { Authorization: "DeepL-Auth-Key " + cleDeepL },
+          payload: JSON.stringify({ text: [p.name], target_lang: "FR" }),
+          muteHttpExceptions: true,
+        });
+        Logger.log("Étape 2 -- DeepL : HTTP " + res.getResponseCode() + " | " + res.getContentText().slice(0, 300));
+      } catch (e) {
+        Logger.log("Étape 2 -- DeepL : erreur " + e.message);
+      }
+    } else {
+      Logger.log("Étape 2 -- DeepL non essayé (pas de clé).");
+    }
+    Logger.log("Étape 3 -- nom retenu par le script : " + nomLisibleTMDb_(p, apiKey));
+  });
+}
