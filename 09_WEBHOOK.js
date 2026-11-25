@@ -2061,7 +2061,12 @@ function reenrichirParIdSheetV1_(idSheet) {
         const analyse = analyserIdentiteEnrichissementV45_(row, h);
         analyse.modifiee = true;
         analyse.identiteModifiee = true;
-        analyse.champsRechercheModifies = true;
+        // 25/11/2026 -- FILM1543 : on forçait aussi « titre/année modifiés », ce qui
+        // faisait ABANDONNER l'ID TMDb de la fiche et relancer une recherche par titre
+        // (homonyme « Faceless » 2024 pris à la place du bon film, ID corrigé à la
+        // main écrasé). On garde maintenant la vraie valeur : la recherche par titre
+        // ne repart que si le titre/l'année ont réellement changé depuis le dernier
+        // enrichissement ; sinon l'ID enregistré est conservé.
         analyse.conserverUrlLetterboxd = estUrlLetterboxdReelleV43_(safeTrim_(get_(row, h, "URLLetterboxd")));
 
         preparerLigneEnrichissementV4_(sheet, rowNumber, row, h, true);
